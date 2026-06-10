@@ -8,6 +8,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from .llm_post_processor import LLMPostProcessor
 from .vosk_engine import VoskEngine
 from .session_manager import SessionManager
 
@@ -23,8 +24,16 @@ PARTIAL_WORD_HISTORY = 5  # trailing words for partial dedup
 class ServerApp:
     """Orchestrates the aiohttp server, routes, and global heartbeat management."""
 
-    def __init__(self, engine: VoskEngine | None = None) -> None:
+    def __init__(
+        self,
+        engine=None,
+        llm_processor: LLMPostProcessor | None = None,
+        buffer_config: dict | None = None,
+    ) -> None:
+        from .vosk_engine import VoskEngine
         self._engine = engine or VoskEngine()
+        self._llm_processor = llm_processor
+        self._buffer_config = buffer_config or {}
         self._app: web.Application | None = None
         self._runner: web.AppRunner | None = None
         self._shutdown_event = asyncio.Event()
@@ -72,6 +81,8 @@ class ServerApp:
             engine=self._engine,
             reset_interval=RESET_INTERVAL,
             partial_word_history=PARTIAL_WORD_HISTORY,
+            llm_processor=self._llm_processor,
+            buffer_config=self._buffer_config,
         )
         await session._setup()
 
@@ -186,6 +197,34 @@ class ServerApp:
                 await self._runner.cleanup()
             except (asyncio.CancelledError, RuntimeError):
                 pass
+
+    @classmethod
+    def from_args(cls, args) -> "ServerApp":
+        """Create ServerApp from parsed CLI arguments."""
+        from .vosk_engine import VoskEngine, MODEL_PATH
+
+        engine = VoskEngine(model_path=MODEL_PATH)
+
+        llm_processor = None
+        if getattr(args, "llm_url", None):
+            llm_processor = LLMPostProcessor(
+                api_url=args.llm_url,
+                api_key=getattr(args, "llm_key", None),
+                model=getattr(args, "llm_model", "llama3"),
+                timeout=getattr(args, "llm_timeout", 5.0),
+            )
+
+        buffer_config = {
+            "max_buffer_size": getattr(args, "llm_buffer_max", 500),
+            "silence_threshold": getattr(args, "llm_silence_threshold", 2.0),
+            "min_buffer_size": getattr(args, "llm_buffer_min", 20),
+        }
+
+        return cls(
+            engine=engine,
+            llm_processor=llm_processor,
+            buffer_config=buffer_config,
+        )
 
     def run(self) -> None:
         """Synchronous entry point: start, run, stop."""

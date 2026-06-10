@@ -1,4 +1,4 @@
-"""SessionManager: manages WebSocket session lifecycle, deduplication, and heartbeat tracking."""
+"""SessionManager: manages WebSocket session lifecycle, deduplication, buffer, and LLM post-processing."""
 
 from __future__ import annotations
 
@@ -7,38 +7,64 @@ import logging
 
 from vosk import KaldiRecognizer
 
+from .transcription_buffer import TranscriptionBuffer
+
 log = logging.getLogger(__name__)
 
 
 class SessionManager:
     """Manages a single WebSocket session: audio processing, dedup, and lifecycle."""
 
+    # Keywords for command mode
+    COMMAND_MODE_KEYWORD = "bavardage"
+    CLEAR_COMMAND_KEYWORD = "effacer"
+    # Keywords for running mode commands
+    CLEAR_LAST_LINE_KEYWORD = "effacer ligne"
+
     def __init__(
         self,
         engine,
         reset_interval: float = 45.0,
         partial_word_history: int = 5,
+        llm_processor=None,
+        buffer_config: dict | None = None,
     ) -> None:
         self._engine = engine
         self._reset_interval = reset_interval
         self._partial_word_history = partial_word_history
+        self._llm_processor = llm_processor
+        self._buffer = TranscriptionBuffer(**(buffer_config or {}))
         self._recognizer: KaldiRecognizer | None = None
         self._processor = None  # initialized in _setup
         self._chunk_count = 0
         self._last_final_text: str = ""
         self._last_partial_words: list[str] = []
+        self._command_mode = False  # False = running mode (default), True = command mode
 
     @property
     def chunk_count(self) -> int:
         return self._chunk_count
 
+    @property
+    def command_mode(self) -> bool:
+        return self._command_mode
+
     async def _setup(self) -> None:
         """Create a fresh recognizer and processor for this session (borrows from pool)."""
         self._recognizer = await self._engine.create_recognizer()
         self._processor = self._create_processor(self._recognizer)
+        self._buffer = TranscriptionBuffer(
+            max_buffer_size=self._buffer._max_buffer_size,
+            silence_threshold=self._buffer._silence_threshold,
+            min_buffer_size=self._buffer._min_buffer_size,
+        )
         self._chunk_count = 0
         self._last_final_text = ""
         self._last_partial_words = []
+        self._command_mode = False
+
+        if self._llm_processor and self._llm_processor.enabled:
+            log.info("LLM post-processing enabled for session")
 
     def _create_processor(self, recognizer: KaldiRecognizer):
         """Create an AudioProcessor instance (imported lazily to avoid circular deps)."""
@@ -59,7 +85,14 @@ class SessionManager:
         self._processor = self._create_processor(self._recognizer)
 
     async def close(self) -> None:
-        """Return the recognizer to the pool and clean up."""
+        """Return the recognizer to the pool, flush remaining buffer, and clean up."""
+        # Flush any remaining text in the buffer
+        remaining = self._buffer.force_flush()
+        if remaining and self._llm_processor:
+            polished = await self._llm_processor.process(remaining)
+            if polished:
+                log.info("LLM flushed remaining text: %s", polished)
+
         if self._recognizer:
             await self._engine.return_recognizer(self._recognizer)
             self._recognizer = None
@@ -94,7 +127,54 @@ class SessionManager:
 
         # Process audio chunk
         result = self._processor.process_chunk(data)
-        if result:
+        if result and result["type"] == "final":
+            text = result["text"].strip().lower()
+
+            # Check for command mode keyword toggle
+            if self.COMMAND_MODE_KEYWORD in text:
+                self._command_mode = not self._command_mode
+                mode_label = "command" if self._command_mode else "running"
+                log.info("Mode toggled to %s mode", mode_label)
+                await ws.send_json({"type": "mode_change", "mode": mode_label})
+                # Never output the keyword itself to the UI
+                return
+
+            # In command mode, check for specific commands (longer keywords first)
+            if self._command_mode:
+                if self.CLEAR_LAST_LINE_KEYWORD in text:
+                    log.info("Clear last line command received")
+                    await ws.send_json({"type": "command", "action": "clear_last_line"})
+                    return
+                if self.CLEAR_COMMAND_KEYWORD in text and " ligne" not in text:
+                    log.info("Clear command received")
+                    await ws.send_json({"type": "command", "action": "clear"})
+                    return
+                else:
+                    # In command mode, don't output normal transcription
+                    return
+
+            # Running mode: check for running-mode commands (longer keywords first)
+            if self.CLEAR_LAST_LINE_KEYWORD in text:
+                log.info("Clear last line command received")
+                await ws.send_json({"type": "command", "action": "clear_last_line"})
+                return
+
+            # Running mode: normal transcription flow
+            # Add fragment to buffer
+            raw_text, should_flush = self._buffer.add_fragment(result["text"], now)
+
+            if should_flush:
+                # Flush buffer to LLM for post-processing
+                buffered_text = self._buffer.flush()
+                if self._llm_processor and self._llm_processor.enabled:
+                    polished_text = await self._llm_processor.process(buffered_text)
+                    await ws.send_json({"type": "final", "text": polished_text})
+                else:
+                    await ws.send_json({"type": "final", "text": buffered_text})
+            else:
+                # Show raw fragment immediately (user sees progress)
+                await ws.send_json({"type": "final", "text": result["text"]})
+        elif result:
             await ws.send_json(result)
 
     def get_stats(self) -> dict:

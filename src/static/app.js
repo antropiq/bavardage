@@ -2,6 +2,7 @@ const toggleBtn = document.getElementById("toggleBtn");
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
 const partialEl = document.getElementById("partial");
+const modeIndicator = document.getElementById("modeIndicator");
 
 let ws = null;
 let audioCtx = null;
@@ -13,6 +14,7 @@ let callbackCount = 0;
 let modelReady = false;
 let pingInterval = null;
 let lastPartialText = "";
+let commandMode = false;
 
 const WS_URL = `ws://${location.host}/ws`;
 const HEALTH_URL = `/health`;
@@ -20,6 +22,18 @@ const HEALTH_URL = `/health`;
 function setStatus(text, listening = false) {
     statusEl.textContent = text;
     statusEl.className = "status" + (listening ? " listening" : "");
+}
+
+function setCommandMode(mode) {
+    commandMode = mode;
+    if (mode) {
+        statusEl.className = "status command-mode listening";
+        setStatus("Mode commande — dites \"bavardage\" pour revenir");
+        modeIndicator.style.display = "inline-block";
+    } else {
+        setStatus("Écoute en cours…", true);
+        modeIndicator.style.display = "none";
+    }
 }
 
 function appendText(text) {
@@ -82,6 +96,27 @@ async function startRecording() {
             if (data.type === "ready") {
                 console.log("[app] Server ready, starting audio");
                 return;
+            }
+            if (data.type === "mode_change") {
+                console.log("[app] Mode changed to:", data.mode);
+                setCommandMode(data.mode === "command");
+                return;
+            }
+            if (data.type === "command") {
+                if (data.action === "clear") {
+                    console.log("[app] Clear command received");
+                    outputEl.value = "";
+                    return;
+                }
+                if (data.action === "clear_last_line") {
+                    console.log("[app] Clear last line command received");
+                    const lines = outputEl.value.split("\n");
+                    if (lines.length > 0) {
+                        lines.pop();
+                        outputEl.value = lines.join("\n");
+                    }
+                    return;
+                }
             }
             if (data.type === "final") {
                 appendText(data.text);
@@ -147,6 +182,7 @@ function stopRecording() {
     outputEl.value = "";
     partialEl.textContent = "";
     lastPartialText = "";
+    commandMode = false;
     console.log("[app] Stopped. Callbacks:", callbackCount, "Total bytes:", totalBytes);
 }
 

@@ -13,7 +13,7 @@ from vosk import KaldiRecognizer, Model
 log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.parent
-MODEL_PATH = PROJECT_ROOT / "vosk-model-fr-0.22"
+MODEL_PATH = PROJECT_ROOT / "vosk-model-small-fr-0.22"
 
 # Number of pre-created recognizers in the pool
 POOL_SIZE = 4

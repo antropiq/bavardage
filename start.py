@@ -55,7 +55,7 @@ def main() -> None:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PROJECT_ROOT)
     server_proc = subprocess.Popen(
-        [python_exe, str(SERVER_SCRIPT)],
+        [python_exe, str(SERVER_SCRIPT)] + sys.argv[1:],
         env=env,
         cwd=str(PROJECT_ROOT),
     )
