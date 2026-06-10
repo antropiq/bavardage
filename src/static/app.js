@@ -6,12 +6,13 @@ const partialEl = document.getElementById("partial");
 let ws = null;
 let audioCtx = null;
 let mediaStream = null;
-let scriptProcessor = null;
+let audioWorkletNode = null;
 let isRecording = false;
 let totalBytes = 0;
 let callbackCount = 0;
 let modelReady = false;
 let pingInterval = null;
+let lastPartialText = "";
 
 const WS_URL = `ws://${location.host}/ws`;
 const HEALTH_URL = `/health`;
@@ -29,7 +30,6 @@ function appendText(text) {
     outputEl.scrollTop = outputEl.scrollHeight;
 }
 
-// Poll /health until model is loaded
 async function waitForModel() {
     toggleBtn.disabled = true;
     toggleBtn.textContent = "Chargement…";
@@ -70,7 +70,6 @@ async function startRecording() {
             toggleBtn.className = "btn btn-stop";
             setStatus("Écoute en cours…", true);
             initAudio();
-            // Send ping every 10 seconds so server knows we're alive
             pingInterval = setInterval(() => {
                 if (ws.readyState === WebSocket.OPEN) {
                     ws.send("ping");
@@ -87,9 +86,13 @@ async function startRecording() {
             if (data.type === "final") {
                 appendText(data.text);
                 partialEl.textContent = "";
+                lastPartialText = "";
             }
             if (data.type === "partial") {
-                partialEl.textContent = data.text;
+                if (data.text !== lastPartialText) {
+                    lastPartialText = data.text;
+                    partialEl.textContent = data.text;
+                }
             }
             if (data.type === "pong") {
                 // Server acknowledged our ping
@@ -116,9 +119,10 @@ async function startRecording() {
 function stopRecording() {
     isRecording = false;
 
-    if (scriptProcessor) {
-        scriptProcessor.disconnect();
-        scriptProcessor = null;
+    if (audioWorkletNode) {
+        try { audioWorkletNode.disconnect(); } catch(e) {}
+        audioWorkletNode.port.onmessage = null;
+        audioWorkletNode = null;
     }
     if (mediaStream) {
         mediaStream.getTracks().forEach((t) => t.stop());
@@ -142,12 +146,35 @@ function stopRecording() {
     setStatus("En attente...");
     outputEl.value = "";
     partialEl.textContent = "";
+    lastPartialText = "";
     console.log("[app] Stopped. Callbacks:", callbackCount, "Total bytes:", totalBytes);
 }
 
 async function initAudio() {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     console.log("[app] AudioContext created, sampleRate:", audioCtx.sampleRate, "state:", audioCtx.state);
+
+    // Listen for state changes (could indicate a problem)
+    audioCtx.addEventListener('statechange', () => {
+        const ctx = audioCtx;
+        if (!ctx) return;
+        console.log("[app] AudioContext state changed to:", ctx.state);
+        if (ctx.state === 'suspended') {
+            console.warn("[app] AudioContext suspended — check for errors");
+        }
+        if (ctx.state === 'closed') {
+            console.error("[app] AudioContext closed unexpectedly");
+        }
+    });
+
+    // Catch errors from the worklet thread
+    const originalConsoleError = console.error;
+    console.error = function(...args) {
+        originalConsoleError.apply(console, args);
+        if (args[0] && typeof args[0] === 'string' && args[0].includes('[worklet]')) {
+            originalConsoleError.apply(console, ['[app] WORKLET ERROR:', args[0].replace('[worklet] ', '')]);
+        }
+    };
 
     if (audioCtx.state === "suspended") {
         await audioCtx.resume();
@@ -164,45 +191,56 @@ async function initAudio() {
     console.log("[app] MediaStream ready");
 
     const source = audioCtx.createMediaStreamSource(mediaStream);
+    console.log("[app] MediaStreamSource created");
 
-    scriptProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
+    // Load the AudioWorklet module
+    const workletUrl = `/audio-processor.js?v=6`;
+    try {
+        await audioCtx.audioWorklet.addModule(workletUrl);
+        console.log("[app] AudioWorklet module loaded");
+    } catch (err) {
+        console.error("[app] Failed to load AudioWorklet:", err);
+        setStatus("Erreur: AudioWorklet non supporté");
+        stopRecording();
+        return;
+    }
 
-    scriptProcessor.onaudioprocess = (event) => {
+    // Create the AudioWorkletNode
+    audioWorkletNode = new AudioWorkletNode(audioCtx, 'resample-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        channelCount: 1,
+    });
+    console.log("[app] AudioWorkletNode created");
+
+    // Handle audio data from the worklet
+    audioWorkletNode.port.onmessage = (event) => {
         callbackCount++;
         if (callbackCount % 100 === 1) {
-            console.log("[app] Callback #", callbackCount, "ws.readyState:", ws ? ws.readyState : "null");
+            console.log("[app] Worklet callback #", callbackCount, "ws.readyState:", ws ? ws.readyState : "null");
         }
 
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-        try {
-            const input = event.inputBuffer.getChannelData(0);
-            const inputRate = audioCtx.sampleRate;
-            const targetRate = 16000;
-            const ratio = inputRate / targetRate;
-            const outLen = Math.floor(input.length / ratio);
-            const pcm = new Int16Array(outLen);
-
-            for (let i = 0; i < outLen; i++) {
-                const srcIdx = i * ratio;
-                const idx = Math.floor(srcIdx);
-                const frac = srcIdx - idx;
-                const a = idx < input.length ? input[idx] : 0;
-                const b = (idx + 1) < input.length ? input[idx + 1] : 0;
-                const s = a + frac * (b - a);
-                pcm[i] = s < 0 ? Math.max(-1, s) * 0x8000 : Math.min(1, s) * 0x7fff;
-            }
-
-            totalBytes += pcm.byteLength;
-            ws.send(pcm.buffer);
-        } catch (err) {
-            console.error("[app] Callback error:", err);
+        const msg = event.data;
+        if (msg.type === 'audio') {
+            totalBytes += msg.data.byteLength;
+            ws.send(msg.data);
         }
     };
 
-    source.connect(scriptProcessor);
-    scriptProcessor.connect(audioCtx.destination);
-    console.log("[app] Audio graph connected");
+    // Error handler on the worklet port
+    audioWorkletNode.port.onerror = (err) => {
+        console.error("[worklet] Port error:", err);
+        console.error("[app] Worklet port error — stopping recording");
+        setStatus("Erreur audio — vérifiez la console");
+        stopRecording();
+    };
+
+    // Connect: source → worklet (no destination — use headphones if you need monitoring)
+    source.connect(audioWorkletNode);
+
+    console.log("[app] Audio graph connected (AudioWorklet)");
 }
 
 toggleBtn.addEventListener("click", () => {

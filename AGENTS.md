@@ -63,15 +63,18 @@ All transcription uses **Vosk Kaldi** — fully offline, no network required.
     - Server sends `{"type":"final","text":"..."}` and `{"type":"partial","text":"..."}` back
     - `KaldiRecognizer.SetWords(True)` enabled for word-level timing
     - Ping/pong keepalive (client pings every 10s)
+    - **Periodic reset** (`RESET_INTERVAL = 45`): resets Vosk internal state every 45 s to prevent accuracy decay on long sessions. Overlap chunking is disabled by default because Vosk's internal VAD gets confused by repeated audio frames.
+    - **Client counter**: server stays alive after client disconnects; only shuts down after `HEARTBEAT_TIMEOUT` (30 s) with zero connected clients.
   - **Heartbeat auto-shutdown**: after 30s without client activity, server shuts down automatically
   - **Static files**: serves `index.html`, `style.css`, `app.js` from `src/static/`
   - Routes: `/`, `/style.css`, `/app.js`, `/health`, `/ws`
 
 - **`src/static/app.js`** — browser client
   - Polls `/health` every 500ms until model is ready
-  - Uses Web Audio API: `AudioContext` → `MediaStream` (mic, mono, echo cancellation, noise suppression) → `createScriptProcessor(4096)`
+  - Uses Web Audio API: `AudioContext` → `MediaStream` (mic, mono, echo cancellation, noise suppression) → `createScriptProcessor(2048)`
   - **Sample rate conversion**: downsamples from device sample rate to 16kHz via linear interpolation
-  - Sends raw PCM s16le buffer via WebSocket binary frames
+  - Sends raw PCM s16le buffer via WebSocket binary frames (~128 ms chunks)
+  - Client-side partial deduplication to prevent UI flicker from server overlap duplicates
   - UI: dark theme, toolbar with status indicator (pulses green while listening), large textarea for final text, italic gray for partial text
 
 - **`start.py`** — cross-platform launcher
@@ -92,3 +95,4 @@ All transcription uses **Vosk Kaldi** — fully offline, no network required.
 - **Server auto-shutdown** — after 30s of no client activity, the server shuts down. A client ping resets the timer.
 - **Single `requirements.txt`** — all dependencies (`vosk`, `pyaudio`, `aiohttp`) are in the root file. Install once.
 - **Audio format** — browser sends raw PCM s16le (little-endian signed 16-bit) at 16kHz mono. The client does linear interpolation resampling from the device's native sample rate.
+- **Server stays alive after disconnect** — after a client stops recording, the server remains running for `HEARTBEAT_TIMEOUT` (30 s) seconds, allowing reconnection. Adjust `HEARTBEAT_TIMEOUT` in `src/server.py` if needed.

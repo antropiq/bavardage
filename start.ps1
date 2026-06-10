@@ -18,8 +18,8 @@ $onExit = {
     if ($serverProcess -and -not $serverProcess.HasExited) {
         Write-Host "Stopping server..." -ForegroundColor Yellow
         try {
-            Stop-Process -Id $serverProcess.Id -Force -ErrorAction Stop
-            $serverProcess.WaitForExit()
+            Stop-Process -Id $serverProcess.Id -ErrorAction Stop
+            $serverProcess.WaitForExit(5000)
         } catch {}
     }
 }

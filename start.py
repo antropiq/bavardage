@@ -1,5 +1,6 @@
 """Cross-platform launcher: starts the server, opens the browser, cleans up on exit."""
 
+import os
 import signal
 import subprocess
 import sys
@@ -51,11 +52,12 @@ def main() -> None:
         sys.exit(1)
 
     print(f"Starting transcription server on port {PORT}...")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(PROJECT_ROOT)
     server_proc = subprocess.Popen(
         [python_exe, str(SERVER_SCRIPT)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
+        env=env,
+        cwd=str(PROJECT_ROOT),
     )
 
     # Cleanup handler
@@ -63,15 +65,12 @@ def main() -> None:
         print("\nShutting down...", file=sys.stderr)
         if server_proc.poll() is None:
             try:
-                if sys.platform == "win32":
-                    server_proc.send_signal(signal.CTRL_BREAK_EVENT)
-                else:
-                    server_proc.terminate()
+                server_proc.terminate()
                 try:
-                    server_proc.wait(timeout=5)
+                    server_proc.communicate(timeout=5)
                 except subprocess.TimeoutExpired:
                     server_proc.kill()
-                    server_proc.wait()
+                    server_proc.communicate()
             except Exception as e:
                 print(f"Cleanup error: {e}", file=sys.stderr)
 
@@ -103,7 +102,7 @@ def main() -> None:
 
     # Wait for server process (it will exit when heartbeat times out or Ctrl+C)
     try:
-        server_proc.wait()
+        server_proc.communicate()
     except KeyboardInterrupt:
         cleanup()
 
