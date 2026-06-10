@@ -1,0 +1,180 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Toolbar ─────────────────────────────────────────── */
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1.5rem;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+    flex-shrink: 0;
+    min-height: 60px;
+}
+
+.toolbar-left h1 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.toolbar-center {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+}
+
+.toolbar-right {
+    width: 160px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* ── Status ──────────────────────────────────────────── */
+
+.status {
+    font-size: 0.875rem;
+    color: #64748b;
+    text-align: center;
+    min-height: 1.5em;
+}
+
+.status.listening {
+    color: #22c55e;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ── Button ──────────────────────────────────────────── */
+
+.btn {
+    padding: 0.625rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+    white-space: nowrap;
+}
+
+.btn:focus-visible {
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.5);
+}
+
+.btn-start {
+    background: #22c55e;
+    color: #052e16;
+}
+
+.btn-start:hover {
+    background: #16a34a;
+}
+
+.btn-stop {
+    background: #ef4444;
+    color: #fff;
+}
+
+.btn-stop:hover {
+    background: #dc2626;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ── Main textarea ───────────────────────────────────── */
+
+main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 1rem;
+    min-height: 0;
+    overflow: hidden;
+}
+
+textarea {
+    flex: 1;
+    width: 100%;
+    padding: 1.25rem;
+    font-size: 1.5rem;
+    line-height: 1.8;
+    background: #0f172a;
+    color: #e2e8f0;
+    border: none;
+    border-radius: 8px;
+    resize: none;
+    outline: none;
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    overflow-y: auto;
+}
+
+textarea:focus {
+    box-shadow: inset 0 0 0 2px #6366f1;
+}
+
+textarea::placeholder {
+    color: #334155;
+}
+
+/* ── Partial (live) text ─────────────────────────────── */
+
+.partial {
+    margin-top: 0.5rem;
+    font-size: 1.25rem;
+    line-height: 1.6;
+    color: #64748b;
+    font-style: italic;
+    min-height: 1.6em;
+    padding: 0 0.5rem;
+}
+
+/* ── Responsive ──────────────────────────────────────── */
+
+@media (max-width: 640px) {
+    .toolbar {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+    }
+
+    .toolbar-left h1 {
+        font-size: 1rem;
+    }
+
+    .toolbar-right {
+        width: auto;
+    }
+
+    textarea {
+        font-size: 1.25rem;
+        line-height: 1.6;
+    }
+}

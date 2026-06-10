@@ -1,0 +1,4 @@
+vosk-model*/
+.venv/
+*.zip
+__pycache__
