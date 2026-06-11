@@ -1,15 +1,27 @@
-"""Cross-platform launcher: starts the server, opens the browser, cleans up on exit."""
+"""Cross-platform launcher: starts the server and cleans up on exit."""
 
 import os
 import signal
 import subprocess
 import sys
-import webbrowser
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent
 SERVER_SCRIPT = PROJECT_ROOT / "src" / "server.py"
 PORT = 8765
+
+
+def get_local_ip() -> str:
+    """Get the machine's local LAN IP address."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
 
 
 def wait_for_server(timeout: float = 30) -> bool:
@@ -30,6 +42,10 @@ def wait_for_server(timeout: float = 30) -> bool:
 
 
 def main() -> None:
+    # Parse --ssl flag if present
+    use_ssl = "--ssl" in sys.argv[1:]
+    scheme = "https" if use_ssl else "http"
+
     # Resolve Python executable: prefer venv, fall back to sys.executable
     venv_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
     if sys.platform == "win32":
@@ -84,23 +100,17 @@ def main() -> None:
 
     # Wait for server to be ready
     ready = wait_for_server()
+    local_ip = get_local_ip()
+    url = f"{scheme}://{local_ip}:{PORT}"
     if ready:
-        print("Server ready!")
+        print(f"Server ready at {url}")
     else:
-        print("Server started (model may still be loading).")
-
-    # Open browser
-    url = f"http://127.0.0.1:{PORT}"
-    print(f"Opening {url} ...")
-    try:
-        webbrowser.open(url)
-    except Exception as e:
-        print(f"Could not open browser: {e}", file=sys.stderr)
-        print(f"Manually open: {url}", file=sys.stderr)
+        print(f"Server started (model may still be loading) at {url}")
+    print(f"Also available at {scheme}://127.0.0.1:{PORT}\n")
 
     print("Press Ctrl+C to stop.\n")
 
-    # Wait for server process (it will exit when heartbeat times out or Ctrl+C)
+    # Wait for server process (it will exit when Ctrl+C is received)
     try:
         server_proc.communicate()
     except KeyboardInterrupt:

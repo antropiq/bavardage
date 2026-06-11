@@ -1,4 +1,8 @@
-"""AudioProcessor: handles chunking, feeding audio to recognizer, and parsing results."""
+"""AudioProcessor: handles chunking, feeding audio to recognizer, and parsing results.
+
+Implements the BaseProcessor interface for plug-and-play interchangeability
+with other processors (e.g. WhisperProcessor).
+"""
 
 from __future__ import annotations
 
@@ -7,10 +11,12 @@ import logging
 
 from vosk import KaldiRecognizer
 
+from .base_processor import BaseProcessor
+
 log = logging.getLogger(__name__)
 
 
-class AudioProcessor:
+class AudioProcessor(BaseProcessor):
     """Processes audio chunks through a Vosk recognizer and yields transcription events."""
 
     def __init__(
@@ -68,7 +74,7 @@ class AudioProcessor:
             return None
 
         self._last_final_text = text
-        log.info("FINAL [%d]: %s", self._chunk_count, text)
+        log.debug("FINAL [%d]: %s", self._chunk_count, text)
         return {"type": "final", "text": text}
 
     def _handle_partial(self) -> dict | None:

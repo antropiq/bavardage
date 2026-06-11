@@ -1,19 +1,23 @@
 # Realtime Speech Transcription
 
-French speech-to-text project using **Vosk Kaldi** (fully offline).
+French speech-to-text project supporting **Vosk Kaldi** and **Whisper** engines (fully offline).
 
 ## Structure
 
 ```
-main_vosk.py     # Terminal-based transcription (PyAudio + Vosk)
+main_vosk.py     # Terminal-based transcription (PyAudio + Vosk/Whisper)
 start.py         # Cross-platform launcher (server + browser + cleanup)
 start.ps1        # Windows PowerShell launcher
 src/
   server.py      # aiohttp server (HTTP + WebSocket)
   server_app.py  # ServerApp orchestration
-  session_manager.py  # WebSocket session management
-  vosk_engine.py     # Vosk model/loading/pooling
-  audio_processor.py # Audio chunk processing
+  session_manager.py     # WebSocket session management
+  base_engine.py # Abstract engine interface
+  base_processor.py      # Abstract processor interface
+  vosk_engine.py         # Vosk model/loading/pooling
+  whisper_engine.py      # faster-whisper (CTranslate2) model/loading
+  audio_processor.py     # Audio chunk processing (Vosk)
+  whisper_processor.py   # Audio chunk processing (Whisper)
   transcription_buffer.py  # Fragment accumulation & silence detection
   llm_post_processor.py    # LLM post-processing (optional)
   static/
@@ -27,6 +31,7 @@ vosk-model-fr-0.22/     # Vosk French model (~100MB, don't commit)
 tests/           # Unit tests
   test_transcription_buffer.py
   test_llm_post_processor.py
+  test_session_manager.py
 llm-migration-layer.md       # LLM post-processing migration spec
 llm-migration-layer-todo-list.md  # Implementation tracking
 ```
@@ -43,8 +48,15 @@ pip install -r requirements.txt
 # Run terminal transcription (direct mic → Vosk, no browser needed)
 python main_vosk.py
 
+# Run terminal transcription with Whisper
+pip install whispercpp numpy
+python main_vosk.py --engine whisper --whisper-model path/to/ggml-base.bin
+
 # Run web server (HTTP + WebSocket on port 8765, opens browser, auto-closes)
 python start.py
+
+# Run with Whisper engine
+python start.py --engine whisper --whisper-model path/to/ggml-base.bin
 
 # Run with LLM post-processing (requires external LLM server)
 python start.py --llm-url http://192.168.1.100:8080 --llm-model llama3
@@ -58,12 +70,22 @@ python start.py --llm-url http://192.168.1.100:8080 \
 # Run with LLM + API key
 python start.py --llm-url http://192.168.1.100:8080 --llm-key my-secret-key
 
+# Run with HTTPS (required for LAN microphone access)
+python start.py --ssl
+
+# Run with debug logging
+python start.py --debug
+
 # Run server directly with CLI args
 PYTHONPATH=. .venv/Scripts/python.exe src/server.py --llm-url http://192.168.1.100:8080
 
 # Run unit tests
 .venv/Scripts/python.exe tests/test_transcription_buffer.py
 .venv/Scripts/python.exe tests/test_llm_post_processor.py
+.venv/Scripts/python.exe tests/test_session_manager.py
+
+# Or run all tests together
+.venv/Scripts/python.exe -m pytest tests/ -v
 
 # Windows PowerShell launcher
 .\start.ps1
@@ -78,17 +100,46 @@ No build command — this is a script-based project.
 
 # Unit tests for LLMPostProcessor
 .venv/Scripts/python.exe tests/test_llm_post_processor.py
+
+# Unit tests for AudioProcessor
+.venv/Scripts/python.exe tests/test_audio_processor.py
+
+# Unit tests for SessionManager
+.venv/Scripts/python.exe tests/test_session_manager.py
+
+# Run all tests together
+.venv/Scripts/python.exe -m pytest tests/ -v
 ```
 
 ## Architecture
 
-All transcription uses **Vosk Kaldi** — fully offline, no network required.
+All transcription uses **Vosk Kaldi** or **faster-whisper (CTranslate2)** — fully offline, no network required.
+
+### Engine Abstraction
+
+Both transcription engines implement the `BaseEngine` interface (`src/base_engine.py`):
+- `is_loaded`: Whether the model is ready
+- `load()`: Load the model (blocking)
+- `create_recognizer()`: Create/borrow a recognizer instance
+- `return_recognizer()`: Return a recognizer to the pool
+- `parse_final_result()`: Parse a final transcription result
+- `parse_partial_result()`: Parse a partial transcription result
+- `get_health_status()`: Return health status for `/health`
+
+Both processors implement the `BaseProcessor` interface (`src/base_processor.py`):
+- `chunk_count`: Number of chunks processed
+- `process_chunk(data)`: Feed an audio chunk, return result dict or None
+- `needs_reset(now)`: Check if reset is needed
+- `get_stats()`: Return processor statistics
+
+This design makes engines and processors plug-and-play interchangeable.
 
 ### Terminal mode (`main_vosk.py`)
 
-- Loads `vosk-model-small-fr-0.22` eagerly at startup
+- Defaults to Vosk with `vosk-model-small-fr-0.22`
 - Opens PyAudio stream at 16kHz mono, 4000 bytes per read
-- `KaldiRecognizer.AcceptWaveform()` on each chunk → `FinalResult()` for completed sentences, `PartialResult()` for live text
+- With Vosk: `KaldiRecognizer.AcceptWaveform()` → `FinalResult()` for completed sentences, `PartialResult()` for live text
+- With Whisper: accumulates audio chunks and transcribes via faster-whisper (CTranslate2) when ≥1s of audio is buffered
 - Final results printed in **bold yellow** with ANSI escape codes
 - Partial results overwrite the terminal line with `\r` (carriage return)
 - Exits on `Ctrl+C`
@@ -96,17 +147,19 @@ All transcription uses **Vosk Kaldi** — fully offline, no network required.
 ### Web mode (`src/server.py` + `start.py`)
 
 - **`src/server.py`** — aiohttp server on port 8765
-  - Loads `vosk-model-small-fr-0.22` eagerly on startup (blocks until ready)
+  - Engine selected via `--engine` flag (`vosk` or `whisper`)
+  - With Vosk: loads `vosk-model-small-fr-0.22` eagerly on startup (blocks until ready)
+  - With Whisper: loads faster-whisper model eagerly on startup (blocks until ready)
   - **Health endpoint** (`GET /health`): returns `{"status":"ready"}` (200) when model loaded, `{"status":"loading"}` (202) otherwise
   - **WebSocket endpoint** (`GET /ws`): receives raw audio, streams transcription back
     - Audio from browser: raw PCM s16le at 16kHz mono, sent via `ws.send()`
     - Server sends `{"type":"final","text":"..."}` and `{"type":"partial","text":"..."}` back
-    - `KaldiRecognizer.SetWords(True)` enabled for word-level timing
+    - Vosk: `KaldiRecognizer.SetWords(True)` enabled for word-level timing
+    - Whisper: accumulates audio chunks, transcribes when ≥1s available (faster-whisper CTranslate2)
     - Ping/pong keepalive (client pings every 10s)
-    - **Periodic reset** (`RESET_INTERVAL = 45`): resets Vosk internal state every 45 s to prevent accuracy decay on long sessions. Overlap chunking is disabled by default because Vosk's internal VAD gets confused by repeated audio frames.
-    - **Client counter**: server stays alive after client disconnects; only shuts down after `HEARTBEAT_TIMEOUT` (30 s) with zero connected clients.
+    - **Periodic reset** (`RESET_INTERVAL = 45`): resets engine internal state every 45 s to prevent accuracy decay on long sessions. Overlap chunking is disabled by default because Vosk's internal VAD gets confused by repeated audio frames.
+    - **Client counter**: server stays alive after client disconnects, allowing reconnection at any time. No auto-shutdown — server runs until stopped with Ctrl+C.
     - **LLM post-processing** (optional): when `--llm-url` is set, final transcription fragments are accumulated in a `TranscriptionBuffer` and flushed to an external LLM API for punctuation, capitalization, and grammar correction. The LLM is accessed via OpenAI-compatible API (works with llama-swap, Ollama, vLLM). If LLM fails, raw text is used as fallback. See `llm-migration-layer.md` for full spec.
-  - **Heartbeat auto-shutdown**: after 30s without client activity, server shuts down automatically
   - **Static files**: serves `index.html`, `style.css`, `app.js` from `src/static/`
   - Routes: `/`, `/style.css`, `/app.js`, `/health`, `/ws`
 
@@ -122,7 +175,7 @@ All transcription uses **Vosk Kaldi** — fully offline, no network required.
   - Finds Python executable (venv first, falls back to `sys.executable`)
   - Starts `src/server.py` as subprocess, **forwards all CLI args** (`sys.argv[1:]`)
   - Waits for TCP connection on port 8765
-  - Opens default browser to `http://127.0.0.1:8765`
+  - Displays the URL `http://127.0.0.1:8765` in the console
   - Handles Ctrl+C/Ctrl+SIGTERM with cleanup (kills server process, waits up to 5s then forces kill)
 
 - **`start.ps1`** — Windows PowerShell launcher (same behavior, PowerShell-native)
@@ -134,10 +187,14 @@ All transcription uses **Vosk Kaldi** — fully offline, no network required.
 - **stdout flushing is critical** — `main_vosk.py` calls `sys.stdout.flush()` explicitly because real-time output depends on it. Don't remove.
 - **`main_vosk.py` partial results use `\r`** — overwrites the terminal line with carriage return. This won't work in piped/redirected output.
 - **Microphone init blocks** — `main_vosk.py` opens the PyAudio stream at startup, which blocks until the mic is ready.
-- **Server auto-shutdown** — after 30s of no client activity, the server shuts down. A client ping resets the timer.
-- **Single `requirements.txt`** — all dependencies (`vosk`, `pyaudio`, `aiohttp`) are in the root file. Install once.
+- **Single `requirements.txt`** — all dependencies (`vosk`, `pyaudio`, `aiohttp`, `faster-whisper`, `numpy`) are in the root file. Install once.
 - **Audio format** — browser sends raw PCM s16le (little-endian signed 16-bit) at 16kHz mono. The client does linear interpolation resampling from the device's native sample rate.
-- **Server stays alive after disconnect** — after a client stops recording, the server remains running for `HEARTBEAT_TIMEOUT` (30 s) seconds, allowing reconnection. Adjust `HEARTBEAT_TIMEOUT` in `src/server_app.py` if needed.
+- **Server stays alive after disconnect** — after a client stops recording, the server remains running indefinitely, allowing reconnection. Server only stops when stopped with Ctrl+C.
+- **Whisper engine** — uses faster-whisper (CTranslate2), automatically downloads models from HuggingFace on first use or accepts local paths. Key flags:
+  - `--engine whisper`: Select Whisper engine
+  - `--whisper-model`: Model size (`tiny`, `base`, `small`, `medium`, `large`) or local path (default: `tiny`)
+  - `--whisper-language`: Language code (default: `fr`)
+  - Models from HuggingFace: `Systran/faster-whisper-tiny`, etc.
 - **LLM post-processing** — when enabled via `--llm-url`, the server buffers transcription fragments and sends them to an external LLM for post-processing. The LLM is optional and non-blocking; if unavailable, raw transcription is used. Key flags:
   - `--llm-url`: LLM API URL (e.g., `http://192.168.1.100:8080`)
   - `--llm-key`: API key (if required)

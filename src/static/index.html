@@ -4,32 +4,34 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Transcription Audio</title>
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/style.css?v=2">
 </head>
 <body>
     <header class="toolbar">
         <div class="toolbar-left">
-            <h1>🎙️ Transcription</h1>
-        </div>
-        <div class="toolbar-center">
-            <div class="status" id="status">Chargement du modèle…</div>
-        </div>
-        <div class="toolbar-right">
             <button id="clearLastLineBtn" class="btn-icon" title="Effacer la ligne">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
             <button id="clearAllBtn" class="btn-icon" title="Effacer tout">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             </button>
-            <button id="toggleBtn" class="btn btn-start" disabled>Chargement…</button>
+            <button id="askQuestionBtn" class="btn-icon" title="Poser une question" disabled>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10H12V2z"></path><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            </button>
+        </div>
+        <div class="toolbar-center">
+        </div>
+        <div class="toolbar-right">
+            <button id="toggleBtn" class="btn btn-start" disabled>Démarrer</button>
         </div>
     </header>
 
     <main>
         <div id="output" class="output"></div>
         <div id="partial" class="partial"></div>
+        <div id="conversation" class="conversation"></div>
     </main>
 
-    <script src="/app.js?v=12"></script>
+    <script src="/app.js?v=13"></script>
 </body>
 </html>

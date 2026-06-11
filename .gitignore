@@ -1,4 +1,6 @@
 vosk-model*/
+models/
 .venv/
 *.zip
 __pycache__
+.coverage

@@ -1,4 +1,8 @@
-"""VoskEngine: manages model loading, recognizer creation, and state resets."""
+"""VoskEngine: manages model loading, recognizer creation, and state resets.
+
+Implements the BaseEngine interface for plug-and-play interchangeability
+with other transcription engines (e.g. WhisperEngine).
+"""
 
 from __future__ import annotations
 
@@ -7,8 +11,11 @@ import json
 import logging
 from collections import deque
 from pathlib import Path
+from typing import Any
 
 from vosk import KaldiRecognizer, Model
+
+from .base_engine import BaseEngine
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +43,7 @@ class RecognizerPool:
             rec = KaldiRecognizer(model, sample_rate)
             rec.SetWords(True)
             self._pool.append(rec)
-        log.info("Recognizer pool initialized with %d recognizers", POOL_SIZE)
+        log.debug("Recognizer pool initialized with %d recognizers", POOL_SIZE)
 
     async def borrow(self) -> KaldiRecognizer:
         """Borrow a recognizer from the pool. Creates one on-demand if pool is empty."""
@@ -62,8 +69,11 @@ class RecognizerPool:
         return len(self._pool)
 
 
-class VoskEngine:
-    """Encapsulates the Vosk ML library: model loading and recognizer lifecycle."""
+class VoskEngine(BaseEngine):
+    """Encapsulates the Vosk ML library: model loading and recognizer lifecycle.
+
+    Implements the BaseEngine interface.
+    """
 
     def __init__(self, model_path: Path | None = None, pool_size: int = POOL_SIZE) -> None:
         self._model: Model | None = None
@@ -82,11 +92,11 @@ class VoskEngine:
         if not self._model_path.is_dir():
             log.error("Vosk model not found at %s", self._model_path)
             raise FileNotFoundError(f"Vosk model not found at {self._model_path}")
-        log.info("Loading Vosk model from %s (this may take a moment)...", self._model_path)
+        log.debug("Loading Vosk model from %s (this may take a moment)...", self._model_path)
         self._model = Model(str(self._model_path))
         self._loaded = True
         self._pool = RecognizerPool(self._model)
-        log.info("Vosk model loaded.")
+        log.debug("Vosk model loaded.")
 
     async def create_recognizer(self) -> KaldiRecognizer:
         """Create or borrow a KaldiRecognizer from the pool at 16kHz with word timing."""

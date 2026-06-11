@@ -1,3 +1,6 @@
 vosk>=0.3.45
 pyaudio>=0.2.14
 aiohttp>=3.8.0
+faster-whisper>=1.0.0
+numpy>=1.24.0
+cryptography>=41.0.0

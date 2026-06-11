@@ -1,7 +1,7 @@
-"""Real-time French speech transcription server using Vosk Kaldi (fully offline).
+"""Real-time French speech transcription server.
 
 Entry point: starts the aiohttp server on port 8765 with WebSocket audio streaming.
-Supports optional LLM post-processing via OpenAI-compatible API.
+Supports multiple transcription engines (Vosk, Whisper) and optional LLM post-processing.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import sys
 from src.server_app import ServerApp
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     stream=sys.stderr,
 )
@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Speech transcription server")
 
-    # Existing arguments
+    # Engine selection
     parser.add_argument(
         "--engine",
         choices=["vosk", "whisper"],
@@ -31,7 +31,30 @@ def parse_args() -> argparse.Namespace:
         help="Transcription engine (default: vosk)",
     )
 
-    # New LLM arguments
+    # Whisper-specific arguments
+    parser.add_argument(
+        "--whisper-model",
+        default="small",
+        help=(
+            "Whisper model size (tiny, base, small, medium, large) or "
+            "local path to a downloaded model directory. "
+            "Models from HuggingFace: Systran/faster-whisper-small, etc. "
+            "(default: small — better accuracy for French)"
+        ),
+    )
+    parser.add_argument(
+        "--whisper-language",
+        default="fr",
+        help="Language code for Whisper transcription (default: fr)",
+    )
+    parser.add_argument(
+        "--whisper-device",
+        choices=["auto", "cpu", "cuda"],
+        default="auto",
+        help="Whisper device (default: auto — detects CUDA if available)",
+    )
+
+    # LLM arguments
     parser.add_argument(
         "--llm-url",
         default=None,
@@ -53,8 +76,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--llm-timeout",
         type=float,
-        default=5.0,
-        help="LLM API timeout in seconds (default: 5.0)",
+        default=15.0,
+        help="LLM API timeout in seconds (default: 15.0)",
     )
     parser.add_argument(
         "--llm-buffer-max",
@@ -75,11 +98,38 @@ def parse_args() -> argparse.Namespace:
         help="Min buffer size in characters to avoid tiny flushes (default: 20)",
     )
 
+    # SSL arguments
+    parser.add_argument(
+        "--ssl",
+        action="store_true",
+        default=False,
+        help="Enable HTTPS with a self-signed certificate (required for LAN microphone access)",
+    )
+    parser.add_argument(
+        "--ssl-certfile",
+        default=None,
+        help="Path to SSL certificate file (default: auto-generates in .ssl/ directory)",
+    )
+    parser.add_argument(
+        "--ssl-keyfile",
+        default=None,
+        help="Path to SSL private key file (default: auto-generates in .ssl/ directory)",
+    )
+
+    # Logging
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=False,
+        help="Enable DEBUG-level logging",
+    )
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    logging.getLogger().setLevel(logging.DEBUG if args.debug else logging.INFO)
     app = ServerApp.from_args(args)
     app.run()
 

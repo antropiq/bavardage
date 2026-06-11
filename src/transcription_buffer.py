@@ -50,6 +50,13 @@ class TranscriptionBuffer:
             if len(self._raw_text) >= self._min_buffer_size:
                 should_flush = True
 
+        if should_flush:
+            flush_text = self._raw_text
+            self._fragments.clear()
+            self._raw_text = ""
+            self._last_flush_time = now
+            return flush_text, should_flush
+
         return self._raw_text, should_flush
 
     def flush(self) -> str:

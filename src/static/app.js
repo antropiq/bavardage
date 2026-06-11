@@ -1,7 +1,8 @@
 const toggleBtn = document.getElementById("toggleBtn");
-const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
 const partialEl = document.getElementById("partial");
+const conversationEl = document.getElementById("conversation");
+const askQuestionBtn = document.getElementById("askQuestionBtn");
 
 let ws = null;
 let audioCtx = null;
@@ -13,14 +14,10 @@ let callbackCount = 0;
 let modelReady = false;
 let pingInterval = null;
 let lastPartialText = "";
+let llmEnabled = false;
 
-const WS_URL = `ws://${location.host}/ws`;
+const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 const HEALTH_URL = `/health`;
-
-function setStatus(text, listening = false) {
-    statusEl.textContent = text;
-    statusEl.className = "status" + (listening ? " listening" : "");
-}
 
 function appendText(text) {
     if (outputEl.textContent.length > 0) {
@@ -33,7 +30,6 @@ function appendText(text) {
 async function waitForModel() {
     toggleBtn.disabled = true;
     toggleBtn.textContent = "Chargement…";
-    setStatus("Chargement du modèle vocal…");
 
     while (!modelReady) {
         try {
@@ -44,8 +40,14 @@ async function waitForModel() {
                 modelReady = true;
                 toggleBtn.disabled = false;
                 toggleBtn.textContent = "Démarrer";
-                setStatus("Prêt — cliquez pour démarrer");
                 console.log("[app] Model loaded");
+
+                // Check LLM availability
+                llmEnabled = data.llm_enabled || false;
+                askQuestionBtn.disabled = !llmEnabled;
+                if (llmEnabled) {
+                    console.log("[app] LLM post-processing enabled");
+                }
                 return;
             }
         } catch (err) {
@@ -56,11 +58,6 @@ async function waitForModel() {
 }
 
 async function startRecording() {
-    if (!modelReady) {
-        setStatus("Modèle en cours de chargement…");
-        return;
-    }
-
     try {
         ws = new WebSocket(WS_URL);
 
@@ -69,7 +66,6 @@ async function startRecording() {
             isRecording = true;
             toggleBtn.textContent = "Arrêter";
             toggleBtn.className = "btn btn-stop";
-            setStatus("Écoute en cours…", true);
             initAudio();
             pingInterval = setInterval(() => {
                 if (ws.readyState === WebSocket.OPEN) {
@@ -79,6 +75,9 @@ async function startRecording() {
         };
 
         ws.onmessage = (event) => {
+            if (event.data === "pong") {
+                return;
+            }
             const data = JSON.parse(event.data);
             if (data.type === "ready") {
                 console.log("[app] Server ready, starting audio");
@@ -103,17 +102,14 @@ async function startRecording() {
         ws.onerror = (err) => {
             console.error("[app] WebSocket error:", err);
             stopRecording();
-            setStatus("Erreur de connexion");
         };
 
         ws.onclose = (e) => {
             console.log("[app] WebSocket closed:", e.code, e.reason);
             stopRecording();
-            setStatus("Connecteur fermé");
         };
     } catch (err) {
         console.error("[app] Start error:", err);
-        setStatus("Erreur: " + err.message);
     }
 }
 
@@ -144,7 +140,6 @@ function stopRecording() {
 
     toggleBtn.textContent = "Démarrer";
     toggleBtn.className = "btn btn-start";
-    setStatus("En attente...");
     outputEl.value = "";
     partialEl.textContent = "";
     lastPartialText = "";
@@ -161,6 +156,75 @@ function clearLastLine() {
 
 function clearAll() {
     outputEl.textContent = "";
+}
+
+function appendConversationEntry(question, answer) {
+    conversationEl.innerHTML = "";
+
+    const questionDiv = document.createElement("div");
+    questionDiv.className = "conversation-question";
+    questionDiv.textContent = question;
+
+    const answerDiv = document.createElement("div");
+    answerDiv.className = "conversation-answer";
+    answerDiv.textContent = answer;
+
+    conversationEl.appendChild(questionDiv);
+    conversationEl.appendChild(answerDiv);
+}
+
+function appendConversationLoading(question) {
+    const questionDiv = document.createElement("div");
+    questionDiv.className = "conversation-question";
+    questionDiv.textContent = question;
+
+    const loadingDiv = document.createElement("div");
+    loadingDiv.className = "conversation-loading";
+    loadingDiv.textContent = "Recherche en cours";
+
+    conversationEl.innerHTML = "";
+    conversationEl.appendChild(questionDiv);
+    conversationEl.appendChild(loadingDiv);
+    return loadingDiv;
+}
+
+async function askQuestion() {
+    const text = outputEl.textContent.trim();
+    if (!text) {
+        console.warn("[app] No text to ask about");
+        return;
+    }
+    if (!llmEnabled) {
+        console.warn("[app] LLM not enabled");
+        return;
+    }
+
+    askQuestionBtn.disabled = true;
+    const loadingEl = appendConversationLoading(text);
+    console.log("[app] Sending to LLM:", text.substring(0, 200));
+
+    try {
+        const res = await fetch("/api/llm-chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text }),
+        });
+        console.log("[app] LLM response status:", res.status);
+
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+            console.error("[app] LLM chat error:", data.error);
+            appendConversationLoading(text + "\n[Erreur: " + data.error + "]");
+            return;
+        }
+
+        appendConversationEntry(text, data.answer);
+    } catch (err) {
+        console.error("[app] LLM chat request failed:", err);
+    } finally {
+        askQuestionBtn.disabled = !llmEnabled;
+    }
 }
 
 async function initAudio() {
@@ -213,7 +277,7 @@ async function initAudio() {
         console.log("[app] AudioWorklet module loaded");
     } catch (err) {
         console.error("[app] Failed to load AudioWorklet:", err);
-        setStatus("Erreur: AudioWorklet non supporté");
+        console.error("[app] AudioWorklet non supporté");
         stopRecording();
         return;
     }
@@ -228,11 +292,6 @@ async function initAudio() {
 
     // Handle audio data from the worklet
     audioWorkletNode.port.onmessage = (event) => {
-        callbackCount++;
-        if (callbackCount % 100 === 1) {
-            console.log("[app] Worklet callback #", callbackCount, "ws.readyState:", ws ? ws.readyState : "null");
-        }
-
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
         const msg = event.data;
@@ -246,7 +305,6 @@ async function initAudio() {
     audioWorkletNode.port.onerror = (err) => {
         console.error("[worklet] Port error:", err);
         console.error("[app] Worklet port error — stopping recording");
-        setStatus("Erreur audio — vérifiez la console");
         stopRecording();
     };
 
@@ -266,6 +324,7 @@ toggleBtn.addEventListener("click", () => {
 
 document.getElementById("clearLastLineBtn").addEventListener("click", clearLastLine);
 document.getElementById("clearAllBtn").addEventListener("click", clearAll);
+askQuestionBtn.addEventListener("click", askQuestion);
 
 // Start polling on page load
 waitForModel();
