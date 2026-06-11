@@ -15,12 +15,6 @@ log = logging.getLogger(__name__)
 class SessionManager:
     """Manages a single WebSocket session: audio processing, dedup, and lifecycle."""
 
-    # Keywords for command mode
-    COMMAND_MODE_KEYWORD = "bavardage"
-    CLEAR_COMMAND_KEYWORD = "effacer"
-    # Keywords for running mode commands
-    CLEAR_LAST_LINE_KEYWORD = "effacer ligne"
-
     def __init__(
         self,
         engine,
@@ -39,15 +33,10 @@ class SessionManager:
         self._chunk_count = 0
         self._last_final_text: str = ""
         self._last_partial_words: list[str] = []
-        self._command_mode = False  # False = running mode (default), True = command mode
 
     @property
     def chunk_count(self) -> int:
         return self._chunk_count
-
-    @property
-    def command_mode(self) -> bool:
-        return self._command_mode
 
     async def _setup(self) -> None:
         """Create a fresh recognizer and processor for this session (borrows from pool)."""
@@ -61,7 +50,6 @@ class SessionManager:
         self._chunk_count = 0
         self._last_final_text = ""
         self._last_partial_words = []
-        self._command_mode = False
 
         if self._llm_processor and self._llm_processor.enabled:
             log.info("LLM post-processing enabled for session")
@@ -129,35 +117,6 @@ class SessionManager:
         result = self._processor.process_chunk(data)
         if result and result["type"] == "final":
             text = result["text"].strip().lower()
-
-            # Check for command mode keyword toggle
-            if self.COMMAND_MODE_KEYWORD in text:
-                self._command_mode = not self._command_mode
-                mode_label = "command" if self._command_mode else "running"
-                log.info("Mode toggled to %s mode", mode_label)
-                await ws.send_json({"type": "mode_change", "mode": mode_label})
-                # Never output the keyword itself to the UI
-                return
-
-            # In command mode, check for specific commands (longer keywords first)
-            if self._command_mode:
-                if self.CLEAR_LAST_LINE_KEYWORD in text:
-                    log.info("Clear last line command received")
-                    await ws.send_json({"type": "command", "action": "clear_last_line"})
-                    return
-                if self.CLEAR_COMMAND_KEYWORD in text and " ligne" not in text:
-                    log.info("Clear command received")
-                    await ws.send_json({"type": "command", "action": "clear"})
-                    return
-                else:
-                    # In command mode, don't output normal transcription
-                    return
-
-            # Running mode: check for running-mode commands (longer keywords first)
-            if self.CLEAR_LAST_LINE_KEYWORD in text:
-                log.info("Clear last line command received")
-                await ws.send_json({"type": "command", "action": "clear_last_line"})
-                return
 
             # Running mode: normal transcription flow
             # Add fragment to buffer

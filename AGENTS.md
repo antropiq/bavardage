@@ -106,7 +106,6 @@ All transcription uses **Vosk Kaldi** — fully offline, no network required.
     - **Periodic reset** (`RESET_INTERVAL = 45`): resets Vosk internal state every 45 s to prevent accuracy decay on long sessions. Overlap chunking is disabled by default because Vosk's internal VAD gets confused by repeated audio frames.
     - **Client counter**: server stays alive after client disconnects; only shuts down after `HEARTBEAT_TIMEOUT` (30 s) with zero connected clients.
     - **LLM post-processing** (optional): when `--llm-url` is set, final transcription fragments are accumulated in a `TranscriptionBuffer` and flushed to an external LLM API for punctuation, capitalization, and grammar correction. The LLM is accessed via OpenAI-compatible API (works with llama-swap, Ollama, vLLM). If LLM fails, raw text is used as fallback. See `llm-migration-layer.md` for full spec.
-    - **Command mode** (voice-activated): the server detects the keyword "bavardage" in final transcription results to toggle between running mode and command mode. In command mode, transcription output is suppressed and specific keywords trigger actions. See "Command Mode" section below.
   - **Heartbeat auto-shutdown**: after 30s without client activity, server shuts down automatically
   - **Static files**: serves `index.html`, `style.css`, `app.js` from `src/static/`
   - Routes: `/`, `/style.css`, `/app.js`, `/health`, `/ws`
@@ -117,7 +116,7 @@ All transcription uses **Vosk Kaldi** — fully offline, no network required.
   - **Sample rate conversion**: downsamples from device sample rate to 16kHz via linear interpolation
   - Sends raw PCM s16le buffer via WebSocket binary frames (~128 ms chunks)
   - Client-side partial deduplication to prevent UI flicker from server overlap duplicates
-  - UI: dark theme, toolbar with status indicator (pulses green while listening), large textarea for final text, italic gray for partial text, orange badge in command mode
+  - UI: dark theme, toolbar with status indicator (pulses green while listening), large textarea for final text, italic gray for partial text
 
 - **`start.py`** — cross-platform launcher
   - Finds Python executable (venv first, falls back to `sys.executable`)
@@ -147,32 +146,3 @@ All transcription uses **Vosk Kaldi** — fully offline, no network required.
   - `--llm-buffer-max`: Max buffer size in chars before forced flush (default: 500)
   - `--llm-silence-threshold`: Seconds of silence to trigger flush (default: 2.0)
   - `--llm-buffer-min`: Min buffer size to avoid tiny flushes (default: 20)
-
-### Command Mode
-
-Voice-activated command mode lets you control the app without touching the keyboard.
-
-**Keywords** (case-insensitive, detected in final transcription):
-
-| Keyword     | Action                                                                 |
-|-------------|------------------------------------------------------------------------|
-| `bavardage` | Toggles between running mode (normal transcription) and command mode   |
-| `effacer`   | Clears all text from the textarea (only works in command mode)         |
-| `effacer ligne` | Removes the last line from the textarea (only works in running mode) |
-
-**Flow:**
-1. **Running mode** (default): normal transcription, text appears in textarea
-2. Say "bavardage" → switches to **command mode** (transcription suppressed, orange badge appears)
-3. Say "effacer" → textarea content is cleared
-4. Say "bavardage" again → switches back to **running mode**
-5. Say "effacer ligne" → removes the last line from the textarea (running mode only)
-
-**Implementation:**
-- `SessionManager.COMMAND_MODE_KEYWORD` = "bavardage"
-- `SessionManager.CLEAR_COMMAND_KEYWORD` = "effacer"
-- `SessionManager.CLEAR_LAST_LINE_KEYWORD` = "effacer ligne"
-- Server sends `{"type":"mode_change","mode":"command|running"}` on toggle
-- Server sends `{"type":"command","action":"clear"}` on clear command
-- Server sends `{"type":"command","action":"clear_last_line"}` on clear last line command
-- Client displays orange "⚡ Mode commande" badge and updates status text in command mode
-- Each WebSocket session maintains its own command mode state independently
