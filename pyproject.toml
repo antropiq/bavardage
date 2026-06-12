@@ -32,9 +32,6 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
 ]
-cuda = [
-    "torch --index-url https://download.pytorch.org/whl/cu128",
-]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

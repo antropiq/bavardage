@@ -19,6 +19,8 @@ source .venv/bin/activate       # macOS / Linux
 
 # Install the package in editable mode with dev dependencies
 pip install -e ".[dev]"
+
+# see GPU Support (CUDA) for optional cuda dependencies
 ```
 
 ### 3. Download the Models

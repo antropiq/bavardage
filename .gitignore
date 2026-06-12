@@ -2,5 +2,19 @@ vosk-model*/
 models/
 .venv/
 *.zip
+# Python bytecode
+*.pyc
+*.pyo
 __pycache__
+
 .coverage
+
+# Python generated files
+*.egg-info/
+dist/
+build/
+*.egg
+
+# OS files
+.DS_Store
+Thumbs.db
