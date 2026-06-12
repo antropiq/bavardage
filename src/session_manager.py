@@ -105,19 +105,26 @@ class SessionManager:
             self._recognizer = None
 
     async def _send_final(self, text: str) -> None:
-        """Send a final transcription result, optionally through LLM."""
-        if self._llm_processor and self._llm_processor.enabled:
-            try:
-                polished = await self._llm_processor.process(text)
-                if polished:
-                    await self._ws.send_json({"type": "final", "text": polished})
-                    return
-            except Exception:
-                pass
+        """Send a final transcription result, optionally through LLM.
+
+        Always sends raw 'final' first, then 'final_llm' with LLM-corrected text
+        if LLM processing is enabled and succeeds.
+        """
+        # Always send raw final first
         try:
             await self._ws.send_json({"type": "final", "text": text})
         except Exception:
             pass
+
+        # If LLM enabled, send corrected version as 'final_llm'
+        if self._llm_processor and self._llm_processor.enabled:
+            try:
+                polished = await self._llm_processor.process(text)
+                if polished:
+                    await self._ws.send_json({"type": "final_llm", "text": polished})
+                    return
+            except Exception:
+                pass
 
     async def handle_message(self, msg, ws, now: float) -> None:
         """Process a single WebSocket message.
@@ -170,8 +177,10 @@ class SessionManager:
                             log.info("LLM flushing buffer: {!r}", raw_text[:200])
                             polished_text = await self._llm_processor.process(raw_text)
                             log.info("LLM flushed: {!r}", polished_text[:200] if polished_text else "")
+                            # Send raw first, then LLM-corrected
+                            await ws.send_json({"type": "final", "text": raw_text})
                             if polished_text:
-                                await ws.send_json({"type": "final", "text": polished_text})
+                                await ws.send_json({"type": "final_llm", "text": polished_text})
                                 return
                         except Exception:
                             log.exception("LLM flush failed")
@@ -184,8 +193,10 @@ class SessionManager:
                             log.info("LLM processing fragment: {!r}", result["text"][:200])
                             polished = await self._llm_processor.process(result["text"])
                             log.info("LLM processed: {!r}", polished[:200] if polished else "")
+                            # Send raw first, then LLM-corrected
+                            await ws.send_json({"type": "final", "text": result["text"]})
                             if polished:
-                                await ws.send_json({"type": "final", "text": polished})
+                                await ws.send_json({"type": "final_llm", "text": polished})
                                 return
                         except Exception:
                             log.exception("LLM fragment processing failed")

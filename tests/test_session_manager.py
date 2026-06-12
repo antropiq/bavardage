@@ -598,15 +598,140 @@ async def test_send_final_with_llm():
 
 
 @pytest.mark.asyncio
-async def test_send_final_without_llm():
+async def test_handle_message_llm_sends_final_and_final_llm():
+    """When LLM is enabled, both 'final' and 'final_llm' messages are sent."""
+    from aiohttp import web
+
+    engine = make_engine()
+    llm = make_llm_processor()
+    ws = make_mock_ws()
+    sm = SessionManager(
+        engine,
+        llm_processor=llm,
+        buffer_config={"max_buffer_size": 10, "min_buffer_size": 1},
+    )
+    sm._processor = make_processor_mock()
+    sm._processor.process_chunk = MagicMock(
+        return_value={"type": "final", "text": "bonjour le monde"}
+    )
+
+    msg = MagicMock()
+    msg.type = web.WSMsgType.BINARY
+    msg.data = b"audio"
+
+    await sm.handle_message(msg, ws, 1.0)
+
+    # Should have been called twice: once for 'final', once for 'final_llm'
+    assert ws.send_json.call_count == 2
+
+    # First call: raw 'final'
+    first_call = ws.send_json.call_args_list[0][0][0]
+    assert first_call["type"] == "final"
+    assert first_call["text"] == "bonjour le monde"
+
+    # Second call: LLM-corrected 'final_llm'
+    second_call = ws.send_json.call_args_list[1][0][0]
+    assert second_call["type"] == "final_llm"
+    assert second_call["text"] == "polished text"
+
+
+@pytest.mark.asyncio
+async def test_handle_message_llm_fallback_sends_only_final():
+    """When LLM fails, only 'final' with raw text is sent (no 'final_llm')."""
+    from aiohttp import web
+
+    engine = make_engine()
+    llm = make_llm_processor()
+    llm.process = AsyncMock(side_effect=Exception("LLM down"))
+    ws = make_mock_ws()
+    sm = SessionManager(
+        engine,
+        llm_processor=llm,
+        buffer_config={"max_buffer_size": 10, "min_buffer_size": 1},
+    )
+    sm._processor = make_processor_mock()
+    sm._processor.process_chunk = MagicMock(
+        return_value={"type": "final", "text": "raw text"}
+    )
+
+    msg = MagicMock()
+    msg.type = web.WSMsgType.BINARY
+    msg.data = b"audio"
+
+    await sm.handle_message(msg, ws, 0.0)
+
+    # Should have been called only once: for 'final' (raw fallback)
+    assert ws.send_json.call_count == 1
+    call_args = ws.send_json.call_args[0][0]
+    assert call_args["type"] == "final"
+    assert call_args["text"] == "raw text"
+
+
+@pytest.mark.asyncio
+async def test_send_final_with_llm_sends_both_messages():
+    """_send_final with LLM sends 'final' then 'final_llm'."""
+    engine = make_engine()
+    llm = make_llm_processor()
+    ws = make_mock_ws()
+    sm = SessionManager(engine, llm_processor=llm)
+    sm._ws = ws
+
+    await sm._send_final("raw text")
+
+    # Should have been called twice
+    assert ws.send_json.call_count == 2
+
+    # First call: raw 'final'
+    first_call = ws.send_json.call_args_list[0][0][0]
+    assert first_call["type"] == "final"
+    assert first_call["text"] == "raw text"
+
+    # Second call: LLM-corrected 'final_llm'
+    second_call = ws.send_json.call_args_list[1][0][0]
+    assert second_call["type"] == "final_llm"
+    assert second_call["text"] == "polished text"
+
+
+@pytest.mark.asyncio
+async def test_send_final_without_llm_sends_only_final():
+    """_send_final without LLM sends only 'final' with raw text."""
     engine = make_engine()
     ws = make_mock_ws()
     sm = SessionManager(engine)
     sm._ws = ws
 
     await sm._send_final("raw text")
+
+    # Should have been called only once
     ws.send_json.assert_called_once()
     call_args = ws.send_json.call_args[0][0]
+    assert call_args["type"] == "final"
+    assert call_args["text"] == "raw text"
+
+
+@pytest.mark.asyncio
+async def test_handle_message_no_llm_sends_only_final():
+    """Without LLM, only 'final' message is sent (no 'final_llm')."""
+    from aiohttp import web
+
+    engine = make_engine()
+    ws = make_mock_ws()
+    sm = SessionManager(engine)  # no LLM
+    sm._processor = make_processor_mock()
+    sm._processor.process_chunk = MagicMock(
+        return_value={"type": "final", "text": "raw text"}
+    )
+
+    msg = MagicMock()
+    msg.type = web.WSMsgType.BINARY
+    msg.data = b"audio"
+
+    await sm.handle_message(msg, ws, 0.0)
+
+    # Should have been called only once
+    ws.send_json.assert_called_once()
+    call_args = ws.send_json.call_args[0][0]
+    assert call_args["type"] == "final"
     assert call_args["text"] == "raw text"
 
 

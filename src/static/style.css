@@ -191,18 +191,6 @@ main {
     color: #334155;
 }
 
-/* ── Partial (live) text ─────────────────────────────── */
-
-.partial {
-    margin-top: 0.5rem;
-    font-size: 1.25rem;
-    line-height: 1.6;
-    color: #64748b;
-    font-style: italic;
-    min-height: 1.6em;
-    padding: 0 0.5rem;
-}
-
 /* ── Conversation (LLM Q&A) ──────────────────────────── */
 
 .conversation {
