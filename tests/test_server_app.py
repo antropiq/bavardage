@@ -211,10 +211,7 @@ def test_run_catches_keyboard_interrupt():
     engine = make_mock_engine()
     app = ServerApp(engine=engine)
     app.build_app()
-    with patch("asyncio.get_event_loop") as mock_loop:
-        mock_loop_instance = MagicMock()
-        mock_loop.return_value = mock_loop_instance
-        mock_loop_instance.run_until_complete.side_effect = KeyboardInterrupt()
+    with patch("asyncio.Event.wait", side_effect=KeyboardInterrupt()):
         app.run()
 
 
@@ -226,10 +223,7 @@ def test_run_cleanup_engine():
     engine._loaded = True
     app = ServerApp(engine=engine)
     app.build_app()
-    with patch("asyncio.get_event_loop") as mock_loop:
-        mock_loop_instance = MagicMock()
-        mock_loop.return_value = mock_loop_instance
-        mock_loop_instance.run_until_complete.side_effect = KeyboardInterrupt()
+    with patch("asyncio.Event.wait", side_effect=KeyboardInterrupt()):
         app.run()
         assert engine._model is None
         assert engine._loaded is False

@@ -371,7 +371,8 @@ class ServerApp:
 
     def run(self) -> None:
         """Synchronous entry point: start, run, stop."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             loop.run_until_complete(self.start())
         except KeyboardInterrupt:
@@ -392,3 +393,4 @@ class ServerApp:
             if hasattr(engine, "_model"):
                 engine._model = None
             engine._loaded = False
+            loop.close()

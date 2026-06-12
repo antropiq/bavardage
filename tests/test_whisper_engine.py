@@ -542,7 +542,7 @@ def test_load_auto_falls_back_to_cpu():
 def test_load_auto_torch_not_installed():
     """Auto device falls back to CPU when torch raises ImportError."""
     with patch("faster_whisper.WhisperModel") as wm, \
-         patch("src.whisper_engine.torch", None, create=True):
+         patch.dict("sys.modules", {"torch": None}):
         model = MagicMock()
         wm.return_value = model
         eng = WhisperEngine(model_size="tiny", device="auto")
