@@ -20,9 +20,6 @@ from vosk import KaldiRecognizer, Model
 
 from .base_engine import BaseEngine
 
-PROJECT_ROOT = Path(__file__).parent.parent
-MODEL_PATH = PROJECT_ROOT / "vosk-model-small-fr-0.22"
-
 # Number of pre-created recognizers in the pool
 POOL_SIZE = 4
 
@@ -35,7 +32,8 @@ class RecognizerPool:
     cost. Recognizers are borrowed and returned via async lock for thread safety.
     """
 
-    def __init__(self, model: Model, sample_rate: int = 16000) -> None:
+    def __init__(self, model: Model, sample_rate: int = 16000, model_path: Path | None = None) -> None:
+        self._model_path = model_path
         self._sample_rate = sample_rate
         self._pool: deque[KaldiRecognizer] = deque()
         self._lock = asyncio.Lock()
@@ -53,7 +51,7 @@ class RecognizerPool:
                 return self._pool.popleft()
         # Pool exhausted — create on-demand (fallback)
         log.debug("Pool exhausted, creating recognizer on-demand")
-        rec = KaldiRecognizer(self._pool[0]._model if self._pool else Model(str(MODEL_PATH)), self._sample_rate)
+        rec = KaldiRecognizer(self._pool[0]._model if self._pool else Model(str(self._model_path)), self._sample_rate)
         rec.SetWords(True)
         return rec
 
@@ -78,7 +76,7 @@ class VoskEngine(BaseEngine):
 
     def __init__(self, model_path: Path | None = None, pool_size: int = POOL_SIZE) -> None:
         self._model: Model | None = None
-        self._model_path = model_path or MODEL_PATH
+        self._model_path = model_path or Path("vosk-model-small-fr-0.22")
         self._loaded = False
         self._pool: RecognizerPool | None = None
 
@@ -96,7 +94,7 @@ class VoskEngine(BaseEngine):
         log.debug("Loading Vosk model from {} (this may take a moment)...", self._model_path)
         self._model = Model(str(self._model_path))
         self._loaded = True
-        self._pool = RecognizerPool(self._model)
+        self._pool = RecognizerPool(self._model, model_path=self._model_path)
         log.debug("Vosk model loaded.")
 
     async def create_recognizer(self) -> KaldiRecognizer:

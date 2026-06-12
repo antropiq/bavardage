@@ -300,9 +300,10 @@ class ServerApp:
                 device=device,
             )
         else:
-            from .vosk_engine import VoskEngine, MODEL_PATH
+            from .vosk_engine import VoskEngine
 
-            engine = VoskEngine(model_path=MODEL_PATH)
+            model_path = Path(getattr(args, "vosk_model", None)) if getattr(args, "vosk_model", None) else None
+            engine = VoskEngine(model_path=model_path)
 
         llm_processor = None
         llm_url = getattr(args, "llm_url", None)
@@ -346,9 +347,10 @@ class ServerApp:
                 device=config.whisper_device,
             )
         else:
-            from .vosk_engine import VoskEngine, MODEL_PATH
+            from .vosk_engine import VoskEngine
 
-            engine = VoskEngine(model_path=MODEL_PATH)
+            model_path = config.vosk_model if hasattr(config, "vosk_model") else None
+            engine = VoskEngine(model_path=model_path)
 
         llm_processor = None
         if config.llm is not None:

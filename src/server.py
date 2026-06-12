@@ -17,6 +17,7 @@ log = logger
 import typer
 from typer.main import get_command as typer_get_command
 from click.testing import CliRunner
+from click.exceptions import NoSuchOption
 
 from src.server_app import ServerApp
 
@@ -25,6 +26,7 @@ from src.server_app import ServerApp
 class ParsedArgs:
     """Namespace-like container for parsed CLI arguments (argparse-compatible)."""
     engine: str
+    vosk_model: str | None
     whisper_model: str
     whisper_language: str
     whisper_device: str
@@ -49,6 +51,7 @@ def _build_typer_app():
     @app.command()
     def _main(
         engine: str = typer.Option("vosk", "--engine", help="Transcription engine (default: vosk)", rich_help_panel="Engine"),
+        vosk_model: str | None = typer.Option(None, "--vosk-model", help="Path to Vosk model directory (default: vosk-model-fr-0.22)", rich_help_panel="Vosk"),
         whisper_model: str = typer.Option("small", "--whisper-model", help="Whisper model size or local path (default: small)", rich_help_panel="Whisper"),
         whisper_language: str = typer.Option("fr", "--whisper-language", help="Language code for Whisper (default: fr)", rich_help_panel="Whisper"),
         whisper_device: str = typer.Option("auto", "--whisper-device", help="Whisper device (default: auto)", rich_help_panel="Whisper"),
@@ -69,6 +72,7 @@ def _build_typer_app():
             raise typer.BadParameter(f"Invalid engine: {engine}. Must be one of: vosk, whisper")
         return ParsedArgs(
             engine=engine,
+            vosk_model=vosk_model,
             whisper_model=whisper_model,
             whisper_language=whisper_language,
             whisper_device=whisper_device,
@@ -104,6 +108,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         except typer.BadParameter as e:
             sys.stderr.write(f"Error: {e}\n")
             sys.exit(2)
+        except NoSuchOption as e:
+            sys.stderr.write(f"Error: {e}\n")
+            click_cmd.main(["--help"], standalone_mode=False)
+            sys.exit(2)
         except SystemExit:
             raise
 
@@ -128,6 +136,8 @@ def _run_console_mode(args: ParsedArgs) -> None:
         from src.console import main as console_main
 
     console_argv = ["--engine", args.engine]
+    if args.vosk_model:
+        console_argv += ["--vosk-model", args.vosk_model]
     if args.whisper_model:
         console_argv += ["--whisper-model", args.whisper_model]
     if args.whisper_language:
@@ -150,6 +160,10 @@ if __name__ == "__main__":
     except typer.BadParameter as e:
         sys.stderr.write(f"Error: {e}\n")
         sys.exit(2)
+    except NoSuchOption as e:
+        sys.stderr.write(f"Error: {e}\n")
+        click_cmd.main(["--help"], standalone_mode=False)
+        sys.exit(2)
     # --help returns 0 (exit code), not ParsedArgs
     if isinstance(result, int):
         sys.exit(result)
@@ -161,6 +175,8 @@ if __name__ == "__main__":
             from src.console import main as console_main
 
         console_argv = ["--engine", args.engine]
+        if args.vosk_model:
+            console_argv += ["--vosk-model", args.vosk_model]
         if args.whisper_model:
             console_argv += ["--whisper-model", args.whisper_model]
         if args.whisper_language:

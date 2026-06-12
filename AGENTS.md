@@ -26,7 +26,7 @@ src/
     style.css    # Dark theme styles
     audio-processor.js  # Web Audio API utilities
   pyproject.toml        # Python dependencies & project config
-vosk-model-fr-0.22/     # Vosk French model (~100MB, don't commit)
+vosk-model-small-fr-0.22/   # Vosk French model (~100MB, don't commit)
 .venv/           # Python virtual environment
 tests/           # Unit tests
   test_transcription_buffer.py
@@ -51,6 +51,9 @@ pip install -e ".[dev,cuda]"
 # Run terminal transcription (direct mic → Vosk, no browser needed)
 python -m src.console
 
+# Run terminal transcription with custom Vosk model
+python -m src.console --vosk-model /path/to/vosk-model
+
 # Run terminal transcription with Whisper
 python -m src.console --engine whisper --whisper-model small
 
@@ -62,6 +65,9 @@ python src/server.py --console --engine whisper
 
 # Run web server (HTTP + WebSocket on port 8765, opens browser, auto-closes)
 python start.py
+
+# Run with custom Vosk model
+python start.py --vosk-model /path/to/vosk-model
 
 # Run with Whisper engine
 python start.py --engine whisper --whisper-model path/to/ggml-base.bin
@@ -161,7 +167,8 @@ This design makes engines and processors plug-and-play interchangeable.
 
 - **`src/server.py`** — aiohttp server on port 8765
   - Engine selected via `--engine` flag (`vosk` or `whisper`)
-  - With Vosk: loads `vosk-model-small-fr-0.22` eagerly on startup (blocks until ready)
+  - Vosk model path via `--vosk-model` flag (default: `vosk-model-small-fr-0.22`)
+  - With Vosk: loads model eagerly on startup (blocks until ready)
   - With Whisper: loads faster-whisper model eagerly on startup (blocks until ready)
   - **Health endpoint** (`GET /health`): returns `{"status":"ready"}` (200) when model loaded, `{"status":"loading"}` (202) otherwise
   - **WebSocket endpoint** (`GET /ws`): receives raw audio, streams transcription back
@@ -196,7 +203,7 @@ This design makes engines and processors plug-and-play interchangeable.
 ## Gotchas
 
 - **Never name a script `vosk.py`** — it shadows the `vosk` package and causes a circular import (`ImportError: cannot import name 'Model' from partially initialized module 'vosk'`). This is why the original `vosk.py` was renamed to `main_vosk.py` and later moved to `src/console.py`.
-- **Vosk model**: `vosk-model-small-fr-0.22/` is ~100MB. Listed in `.gitignore`. Download from https://alphacephei.com/vosk/models (README.txt has the link).
+- **Vosk model**: `vosk-model-small-fr-0.22/` is ~100MB. Listed in `.gitignore`. Download from https://alphacephei.com/vosk/models (README.txt has the link). Custom path via `--vosk-model`.
 - **stdout flushing is critical** — `src/console.py` calls `sys.stdout.flush()` explicitly because real-time output depends on it. Don't remove.
 - **`src/console.py` partial results use `\r`** — overwrites the terminal line with carriage return. This won't work in piped/redirected output.
 - **Microphone init blocks** — `src/console.py` opens the PyAudio stream at startup, which blocks until the mic is ready.
