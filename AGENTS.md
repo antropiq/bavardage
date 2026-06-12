@@ -25,7 +25,7 @@ src/
     app.js       # Audio capture + WebSocket client
     style.css    # Dark theme styles
     audio-processor.js  # Web Audio API utilities
-  requirements.txt
+  pyproject.toml        # Python dependencies & project config
 vosk-model-fr-0.22/     # Vosk French model (~100MB, don't commit)
 .venv/           # Python virtual environment
 tests/           # Unit tests
@@ -42,8 +42,11 @@ llm-migration-layer-todo-list.md  # Implementation tracking
 # Activate environment
 .venv/Scripts/activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install the package in editable mode with dev dependencies
+pip install -e ".[dev]"
+
+# Or with CUDA support for GPU-accelerated Whisper
+pip install -e ".[dev,cuda]"
 
 # Run terminal transcription (direct mic → Vosk, no browser needed)
 python -m src.console
@@ -116,7 +119,7 @@ No build command — this is a script-based project.
 .venv/Scripts/python.exe -m pytest tests/ -v
 
 # Audit dependencies for CVE vulnerabilities
-.venv/Scripts/python.exe -m pip_audit -r requirements.txt
+.venv/Scripts/python.exe pip-audit
 ```
 
 ## Architecture
@@ -197,7 +200,8 @@ This design makes engines and processors plug-and-play interchangeable.
 - **stdout flushing is critical** — `src/console.py` calls `sys.stdout.flush()` explicitly because real-time output depends on it. Don't remove.
 - **`src/console.py` partial results use `\r`** — overwrites the terminal line with carriage return. This won't work in piped/redirected output.
 - **Microphone init blocks** — `src/console.py` opens the PyAudio stream at startup, which blocks until the mic is ready.
-- **Single `requirements.txt`** — all dependencies (`vosk`, `pyaudio`, `aiohttp`, `faster-whisper`, `numpy`) are in the root file. Install once.
+- **No build command** — this is a script-based project. Install with `pip install -e ".[dev]"`.
+- **CUDA support** — install `torch` with CUDA 12.8 via `pip install -e ".[dev,cuda]"` for GPU-accelerated Whisper mode (`--whisper-device cuda`).
 - **Audio format** — browser sends raw PCM s16le (little-endian signed 16-bit) at 16kHz mono. The client does linear interpolation resampling from the device's native sample rate.
 - **Server stays alive after disconnect** — after a client stops recording, the server remains running indefinitely, allowing reconnection. Server only stops when stopped with Ctrl+C.
 - **Whisper engine** — uses faster-whisper (CTranslate2), automatically downloads models from HuggingFace on first use or accepts local paths. Key flags:

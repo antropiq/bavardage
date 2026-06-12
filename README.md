@@ -17,8 +17,8 @@ python -m venv .venv
 .venv\Scripts\activate          # Windows
 source .venv/bin/activate       # macOS / Linux
 
-# Install dependencies
-pip install -r requirements.txt
+# Install the package in editable mode with dev dependencies
+pip install -e ".[dev]"
 ```
 
 ### 3. Download the Models
@@ -39,7 +39,7 @@ realtime-speech/
 ├── vosk-model-small-fr-0.22/   # ← Vosk model folder (optional, ~100 MB)
 ├── faster-whisper-models/      # ← Whisper models (optional, downloaded automatically)
 ├── src/
-├── requirements.txt
+├── pyproject.toml
 └── ...
 ```
 
@@ -139,6 +139,31 @@ This design makes engines and processors plug-and-play interchangeable.
 - Language-specific initial prompts for better accuracy
 - Max buffer of 30 seconds to prevent unbounded growth
 
+### GPU Support (CUDA)
+
+Whisper engine uses **faster-whisper** with CTranslate2 for GPU acceleration via CUDA. To enable GPU mode:
+
+1. Install PyTorch with CUDA support matching your CUDA toolkit version:
+
+```bash
+# CUDA 12.8 (recommended)
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+
+# CUDA 12.1
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# CUDA 11.8
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+```
+
+2. Run with `--whisper-device cuda`:
+
+```bash
+python start.py --engine whisper --whisper-device cuda
+```
+
+Without CUDA, Whisper runs on CPU (no extra dependencies needed).
+
 ### Audio Processing
 
 - **AudioProcessor** (`src/audio_processor.py`): Processes audio chunks through Vosk recognizer with partial deduplication (last N words comparison)
@@ -227,7 +252,7 @@ src/
     app.js            # Audio capture + WebSocket client
     style.css         # Dark theme styles
     audio-processor.js# AudioWorklet resampling processor
-requirements.txt      # Python dependencies
+pyproject.toml        # Python dependencies & project config
 tests/                # Unit tests
 vosk-model-small-fr-0.22/   # Vosk French model (~100MB, don't commit)
 faster-whisper-models/      # Whisper models (optional)
@@ -263,7 +288,7 @@ python -m src.console --engine whisper --whisper-model small
 python -m pytest tests/ -v
 
 # Audit dependencies for CVE vulnerabilities
-pip audit -r requirements.txt
+pip-audit
 ```
 
 ## Notes
@@ -274,3 +299,4 @@ pip audit -r requirements.txt
 - **Console mode** — partial results use `\r` to overwrite the terminal line; won't work in piped/redirected output.
 - **LLM post-processing** is fully optional and non-blocking. If the LLM is unavailable or fails, raw transcription text is used as fallback.
 - **No build command** — this is a script-based project.
+- **GPU acceleration** is optional. Install the matching CUDA version of PyTorch before running Whisper in `cuda` mode.

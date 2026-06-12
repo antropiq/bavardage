@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bavardage"
+version = "0.1.0"
+description = "Realtime Speech Transcription project"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "vgr", email = "vgar44@laposte.net" }
+]
+dependencies = [
+    "vosk>=0.3.45",
+    "pyaudio>=0.2.14",
+    "aiohttp>=3.8.0",
+    "faster-whisper>=1.0.0",
+    "numpy>=1.24.0",
+    "cryptography>=41.0.0",
+    "typer>=0.9.0",
+    "tenacity>=8.2.0",
+    "loguru>=0.7.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pip-audit>=2.5.0",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+]
+cuda = [
+    "torch --index-url https://download.pytorch.org/whl/cu128",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.setuptools.packages.find]
+include = ["src*"]
