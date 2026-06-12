@@ -5,17 +5,19 @@ from __future__ import annotations
 import asyncio
 import datetime
 import ipaddress
-import logging
 import ssl
 from pathlib import Path
+
+from loguru import logger
+
+log = logger
 
 from aiohttp import web
 
 from .base_engine import BaseEngine
+from .config import LLMConfig, ServerConfig
 from .llm_post_processor import LLMPostProcessor
 from .session_manager import SessionManager
-
-log = logging.getLogger(__name__)
 
 PORT = 8765
 STATIC_DIR = Path(__file__).parent / "static"
@@ -84,7 +86,7 @@ def _create_ssl_context(args) -> ssl.SSLContext:
     cert_path = Path(certfile)
     cert_path.write_bytes(cert.public_bytes(Encoding.PEM))
 
-    log.info("SSL certificate generated at %s", certfile)
+    log.info("SSL certificate generated at {}", certfile)
 
     # Load and return SSL context
     ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
@@ -120,10 +122,8 @@ class ServerApp:
         self._engine.load()
 
         self._app = web.Application()
+        self._app.router.add_static('/static/', str(STATIC_DIR), name='static')
         self._app.router.add_get("/", self._index_handler)
-        self._app.router.add_get("/style.css", self._css_handler)
-        self._app.router.add_get("/app.js", self._js_handler)
-        self._app.router.add_get("/audio-processor.js", self._js_handler)
         self._app.router.add_get("/health", self._health_handler)
         self._app.router.add_post("/api/llm-chat", self._llm_chat_handler)
         self._app.router.add_get("/ws", self._websocket_handler)
@@ -134,7 +134,7 @@ class ServerApp:
         ws = web.WebSocketResponse(compress=True)
         await ws.prepare(request)
         client_ip = request.remote or "unknown"
-        log.info("Client connected from %s", client_ip)
+        log.info("Client connected from {}", client_ip)
 
         # Send ready signal before accepting audio
         await ws.send_json({"type": "ready"})
@@ -155,9 +155,9 @@ class ServerApp:
                 await session.handle_message(msg, ws, now)
                 chunk_count = session.chunk_count
 
-            log.debug("Stream ended after %d chunks", chunk_count)
+            log.debug("Stream ended after {} chunks", chunk_count)
         except Exception as exc:
-            log.exception("WebSocket error after %d chunks: %s", chunk_count, exc)
+            log.exception("WebSocket error after {} chunks: {}", chunk_count, exc)
         finally:
             await session.close()
             log.info("Client disconnected")
@@ -184,7 +184,7 @@ class ServerApp:
                 "If it is a question, answer it. If it is a statement, acknowledge it and add relevant information. "
                 "Always respond in French. Be concise."
             )
-            log.info("LLM chat: url=%s model=%s text=%s", self._llm_processor._api_url, self._llm_processor._model, user_text[:100])
+            log.info("LLM chat: url={} model={} text={}", self._llm_processor._api_url, self._llm_processor._model, user_text[:100])
             response = await self._llm_processor._call_llm(
                 user_text, system_prompt=chat_system_prompt
             )
@@ -193,7 +193,7 @@ class ServerApp:
                 return web.json_response({"answer": answer})
             return web.json_response({"error": "Empty response from LLM"}, status=502)
         except Exception as e:
-            log.exception("LLM chat failed: %s", e)
+            log.exception("LLM chat failed: {}", e)
             return web.json_response({"error": str(e)}, status=502)
 
     async def _health_handler(self, request: web.Request) -> web.Response:
@@ -206,31 +206,12 @@ class ServerApp:
         }
         return web.json_response(response, status=status_code)
 
-    def _static_file_handler(self, path: str) -> web.FileResponse:
-        """Serve a static file, returning FileResponse or HTTP 404."""
-        file_path = (STATIC_DIR / path.lstrip("/")).resolve()
-        if not file_path.is_file() or not str(file_path).startswith(str(STATIC_DIR.resolve())):
-            return web.Response(status=404, text="Not found")
-        return web.FileResponse(file_path)
-
     async def _index_handler(self, request: web.Request) -> web.FileResponse:
-        return self._static_file_handler("/index.html")
-
-    async def _css_handler(self, request: web.Request) -> web.Response:
-        file_path = (STATIC_DIR / request.path.lstrip("/")).resolve()
-        if not file_path.is_file():
+        """Serve index.html at root path."""
+        index_path = (STATIC_DIR / "index.html").resolve()
+        if not index_path.is_file():
             return web.Response(status=404, text="Not found")
-        resp = web.FileResponse(file_path)
-        resp.headers["Cache-Control"] = "no-cache"
-        return resp
-
-    async def _js_handler(self, request: web.Request) -> web.Response:
-        file_path = (STATIC_DIR / request.path.lstrip("/")).resolve()
-        if not file_path.is_file():
-            return web.Response(status=404, text="Not found")
-        resp = web.FileResponse(file_path)
-        resp.headers["Cache-Control"] = "no-cache"
-        return resp
+        return web.FileResponse(index_path)
 
     async def start(self) -> None:
         """Start the aiohttp server and wait for shutdown (Ctrl+C only)."""
@@ -247,7 +228,7 @@ class ServerApp:
             site = web.TCPSite(self._runner, "0.0.0.0", PORT)
             scheme = "http"
 
-        log.info("Server running on %s://0.0.0.0:%d", scheme, PORT)
+        log.info("Server running on {}://0.0.0.0:{}", scheme, PORT)
         log.info("Server will run until stopped with Ctrl+C")
 
         try:
@@ -290,13 +271,16 @@ class ServerApp:
             engine = VoskEngine(model_path=MODEL_PATH)
 
         llm_processor = None
-        if getattr(args, "llm_url", None):
-            llm_processor = LLMPostProcessor(
-                api_url=args.llm_url,
+        llm_url = getattr(args, "llm_url", None)
+        if llm_url:
+            llm_config = LLMConfig(
+                api_url=llm_url,
                 api_key=getattr(args, "llm_key", None),
                 model=getattr(args, "llm_model", "llama3"),
                 timeout=getattr(args, "llm_timeout", 5.0),
+                max_retries=getattr(args, "llm_buffer_max", 1),
             )
+            llm_processor = LLMPostProcessor(config=llm_config)
 
         buffer_config = {
             "max_buffer_size": getattr(args, "llm_buffer_max", 500),
@@ -312,6 +296,42 @@ class ServerApp:
             engine=engine,
             llm_processor=llm_processor,
             buffer_config=buffer_config,
+            ssl_context=ssl_context,
+        )
+
+    @classmethod
+    def from_config(cls, config: ServerConfig) -> "ServerApp":
+        """Create ServerApp from a ServerConfig model."""
+        if config.engine == "whisper":
+            from .whisper_engine import WhisperEngine
+
+            engine = WhisperEngine(
+                model_path=config.whisper_model,
+                model_size=config.whisper_model,
+                language=config.whisper_language,
+                device=config.whisper_device,
+            )
+        else:
+            from .vosk_engine import VoskEngine, MODEL_PATH
+
+            engine = VoskEngine(model_path=MODEL_PATH)
+
+        llm_processor = None
+        if config.llm is not None:
+            llm_processor = LLMPostProcessor(config=config.llm)
+
+        ssl_context = None
+        if config.ssl:
+            ssl_args = type("SSLArgs", (), {
+                "ssl_certfile": config.ssl_certfile,
+                "ssl_keyfile": config.ssl_keyfile,
+            })()
+            ssl_context = _create_ssl_context(ssl_args)
+
+        return cls(
+            engine=engine,
+            llm_processor=llm_processor,
+            buffer_config=config.buffer_config,
             ssl_context=ssl_context,
         )
 

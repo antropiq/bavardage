@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from loguru import logger
 
 from openai import AsyncOpenAI, APIError, APITimeoutError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-log = logging.getLogger(__name__)
+from .config import LLMConfig
+
+log = logger
 
 
 class LLMPostProcessor:
@@ -20,23 +22,35 @@ class LLMPostProcessor:
 
     def __init__(
         self,
-        api_url: str,
+        api_url: str | None = None,
         api_key: str | None = None,
         model: str = "llama3",
         system_prompt: str | None = None,
         timeout: float = 5.0,
         max_retries: int = 1,
+        config: LLMConfig | None = None,
     ) -> None:
-        base_url = api_url.rstrip("/")
+        if config is not None:
+            self._config = config
+            base_url = config.base_url
+            self._api_key = config.api_key
+            self._model = config.model
+            self._system_prompt = system_prompt or config.system_prompt or self._default_system_prompt()
+            self._timeout = config.timeout
+            self._max_retries = config.max_retries
+        else:
+            self._config = None
+            base_url = (api_url or "").rstrip("/")
+            self._api_key = api_key
+            self._model = model
+            self._system_prompt = system_prompt or self._default_system_prompt()
+            self._timeout = timeout
+            self._max_retries = max_retries
+
         self._api_url = base_url
-        self._api_key = api_key
-        self._model = model
-        self._system_prompt = system_prompt or self._default_system_prompt()
-        self._timeout = timeout
-        self._max_retries = max_retries
-        self._enabled = bool(api_url)
+        self._enabled = bool(base_url)
         if self._enabled:
-            client_key = api_key or "sk-dummy-key-for-testing"
+            client_key = self._api_key or "sk-dummy-key-for-testing"
             self._client = AsyncOpenAI(base_url=f"{base_url}/v1", api_key=client_key)
         else:
             self._client = None  # type: ignore[assignment]
@@ -75,12 +89,12 @@ class LLMPostProcessor:
                 polished = self._extract_text(response)
                 if polished:
                     return polished
-                log.warning("LLM returned empty response for attempt %d", attempt + 1)
+                log.warning("LLM returned empty response for attempt {}", attempt + 1)
                 if attempt == self._max_retries:
                     return raw_text
                 await asyncio.sleep(0.5 * (attempt + 1))
             except Exception as e:
-                log.warning("LLM call failed (attempt %d/%d): %s", attempt + 1, self._max_retries + 1, e)
+                log.warning("LLM call failed (attempt {}/{}): {}", attempt + 1, self._max_retries + 1, e)
                 return raw_text
 
         return raw_text

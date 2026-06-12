@@ -8,16 +8,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from collections import deque
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
+log = logger
+
 from vosk import KaldiRecognizer, Model
 
 from .base_engine import BaseEngine
-
-log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.parent
 MODEL_PATH = PROJECT_ROOT / "vosk-model-small-fr-0.22"
@@ -43,7 +44,7 @@ class RecognizerPool:
             rec = KaldiRecognizer(model, sample_rate)
             rec.SetWords(True)
             self._pool.append(rec)
-        log.debug("Recognizer pool initialized with %d recognizers", POOL_SIZE)
+        log.debug("Recognizer pool initialized with {} recognizers", POOL_SIZE)
 
     async def borrow(self) -> KaldiRecognizer:
         """Borrow a recognizer from the pool. Creates one on-demand if pool is empty."""
@@ -90,9 +91,9 @@ class VoskEngine(BaseEngine):
         if self._loaded:
             return
         if not self._model_path.is_dir():
-            log.error("Vosk model not found at %s", self._model_path)
+            log.error("Vosk model not found at {}", self._model_path)
             raise FileNotFoundError(f"Vosk model not found at {self._model_path}")
-        log.debug("Loading Vosk model from %s (this may take a moment)...", self._model_path)
+        log.debug("Loading Vosk model from {} (this may take a moment)...", self._model_path)
         self._model = Model(str(self._model_path))
         self._loaded = True
         self._pool = RecognizerPool(self._model)
@@ -119,7 +120,7 @@ class VoskEngine(BaseEngine):
         try:
             result = json.loads(result_str)
         except json.JSONDecodeError:
-            log.warning("Bad FinalResult JSON: %r", result_str[:200])
+            log.warning("Bad FinalResult JSON: {!r}", result_str[:200])
             return None
         text = result.get("text", "").strip()
         if not text:

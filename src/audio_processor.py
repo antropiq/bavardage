@@ -7,13 +7,13 @@ with other processors (e.g. WhisperProcessor).
 from __future__ import annotations
 
 import json
-import logging
+from loguru import logger
 
 from vosk import KaldiRecognizer
 
 from .base_processor import BaseProcessor
 
-log = logging.getLogger(__name__)
+log = logger
 
 
 class AudioProcessor(BaseProcessor):
@@ -74,7 +74,7 @@ class AudioProcessor(BaseProcessor):
             return None
 
         self._last_final_text = text
-        log.debug("FINAL [%d]: %s", self._chunk_count, text)
+        log.debug("FINAL [{}]: {}", self._chunk_count, text)
         return {"type": "final", "text": text}
 
     def _handle_partial(self) -> dict | None:
@@ -103,7 +103,7 @@ class AudioProcessor(BaseProcessor):
             return json.loads(result_str)
         except json.JSONDecodeError:
             if is_final:
-                log.warning("Bad %sResult JSON: %r", "Final" if is_final else "Partial", result_str[:200])
+                log.warning("Bad {}Result JSON: {!r}", "Final" if is_final else "Partial", result_str[:200])
             return None
 
     def get_stats(self) -> dict:

@@ -7,22 +7,18 @@ Supports multiple transcription engines (Vosk, Whisper) and optional LLM post-pr
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 from dataclasses import dataclass
+
+from loguru import logger
+
+log = logger
 
 import typer
 from typer.main import get_command as typer_get_command
 from click.testing import CliRunner
 
 from src.server_app import ServerApp
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    stream=sys.stderr,
-)
-log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -111,7 +107,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    logging.getLogger().setLevel(logging.DEBUG if args.debug else logging.INFO)
+    log_level = "DEBUG" if args.debug else "INFO"
+    logger.remove()
+    logger.add(sys.stderr, level=log_level, format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
     app = ServerApp.from_args(args)
     app.run()
 
@@ -133,6 +131,8 @@ if __name__ == "__main__":
     if isinstance(result, int):
         sys.exit(result)
     args = result
-    logging.getLogger().setLevel(logging.DEBUG if args.debug else logging.INFO)
+    log_level = "DEBUG" if args.debug else "INFO"
+    logger.remove()
+    logger.add(sys.stderr, level=log_level, format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
     app = ServerApp.from_args(args)
     app.run()

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from loguru import logger
 
-log = logging.getLogger(__name__)
+log = logger
 
 
 class TranscriptionBuffer:

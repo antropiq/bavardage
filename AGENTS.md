@@ -109,6 +109,9 @@ No build command — this is a script-based project.
 
 # Run all tests together
 .venv/Scripts/python.exe -m pytest tests/ -v
+
+# Audit dependencies for CVE vulnerabilities
+.venv/Scripts/python.exe -m pip_audit -r requirements.txt
 ```
 
 ## Architecture

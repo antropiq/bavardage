@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from loguru import logger
 
 from .base_engine import BaseEngine
 from .transcription_buffer import TranscriptionBuffer
 
-log = logging.getLogger(__name__)
+log = logger
 
 
 class SessionManager:
@@ -87,7 +87,7 @@ class SessionManager:
         if remaining and self._llm_processor:
             polished = await self._llm_processor.process(remaining)
             if polished:
-                log.debug("LLM flushed remaining text: %s", polished)
+                log.debug("LLM flushed remaining text: {}", polished)
 
         # Flush any remaining audio in the Whisper processor (Vosk has none)
         if hasattr(self._processor, "flush_remaining"):
@@ -141,18 +141,18 @@ class SessionManager:
 
         # Check if a reset is needed
         if self._processor and self._processor.needs_reset(now):
-            log.debug("Resetting recognizer (chunk %d)", self._chunk_count)
+            log.debug("Resetting recognizer (chunk {})", self._chunk_count)
             await self._reset_recognizer()
             self._processor._last_reset_time = now
 
         # Process audio chunk
         result = self._processor.process_chunk(data)
         if result and result["type"] == "final":
-            log.info("FINAL result: %r", result["text"][:200])
+            log.info("FINAL result: {!r}", result["text"][:200])
 
             # Add fragment to buffer
             raw_text, should_flush = self._buffer.add_fragment(result["text"], now)
-            log.info("Buffer: raw_text=%r should_flush=%s llm_enabled=%s",
+            log.info("Buffer: raw_text={!r} should_flush={} llm_enabled={}",
                      raw_text[:100] if raw_text else "", should_flush,
                      self._llm_processor.enabled if self._llm_processor else False)
 
@@ -161,29 +161,29 @@ class SessionManager:
                     # Buffer was already cleared by add_fragment; use returned text
                     if self._llm_processor and self._llm_processor.enabled:
                         try:
-                            log.info("LLM flushing buffer: %r", raw_text[:200])
+                            log.info("LLM flushing buffer: {!r}", raw_text[:200])
                             polished_text = await self._llm_processor.process(raw_text)
-                            log.info("LLM flushed: %r", polished_text[:200] if polished_text else "")
+                            log.info("LLM flushed: {!r}", polished_text[:200] if polished_text else "")
                             if polished_text:
                                 await ws.send_json({"type": "final", "text": polished_text})
                                 return
                         except Exception:
                             log.exception("LLM flush failed")
-                    log.info("Sending raw flushed text: %r", raw_text[:200])
+                    log.info("Sending raw flushed text: {!r}", raw_text[:200])
                     await ws.send_json({"type": "final", "text": raw_text})
                 else:
                     # Process fragment through LLM when enabled
                     if self._llm_processor and self._llm_processor.enabled:
                         try:
-                            log.info("LLM processing fragment: %r", result["text"][:200])
+                            log.info("LLM processing fragment: {!r}", result["text"][:200])
                             polished = await self._llm_processor.process(result["text"])
-                            log.info("LLM processed: %r", polished[:200] if polished else "")
+                            log.info("LLM processed: {!r}", polished[:200] if polished else "")
                             if polished:
                                 await ws.send_json({"type": "final", "text": polished})
                                 return
                         except Exception:
                             log.exception("LLM fragment processing failed")
-                    log.info("Sending raw fragment: %r", result["text"][:200])
+                    log.info("Sending raw fragment: {!r}", result["text"][:200])
                     await ws.send_json({"type": "final", "text": result["text"]})
             except Exception:
                 log.exception("Failed to send final result")

@@ -15,16 +15,17 @@ Usage:
 from __future__ import annotations
 
 import json
-import logging
 import time
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
+log = logger
+
 import numpy as np
 
 from .base_engine import BaseEngine
-
-log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -149,7 +150,7 @@ class WhisperRecognizer:
                     return {"type": "final", "text": full_text}
 
         except Exception as exc:
-            log.warning("Whisper transcription failed: %s", exc)
+            log.warning("Whisper transcription failed: {}", exc)
 
         return None
 
@@ -202,7 +203,7 @@ class WhisperRecognizer:
                     return full_text
 
         except Exception as exc:
-            log.warning("Whisper flush transcription failed: %s", exc)
+            log.warning("Whisper flush transcription failed: {}", exc)
 
         return None
 

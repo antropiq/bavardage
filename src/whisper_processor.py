@@ -7,12 +7,12 @@ with other processors (e.g. AudioProcessor).
 
 from __future__ import annotations
 
-import logging
+from loguru import logger
 
 from .base_processor import BaseProcessor
 from .whisper_engine import WhisperRecognizer
 
-log = logging.getLogger(__name__)
+log = logger
 
 
 class WhisperProcessor(BaseProcessor):
@@ -48,7 +48,7 @@ class WhisperProcessor(BaseProcessor):
 
         if result and result["type"] == "final":
             self._last_final_text = result["text"]
-            log.debug("WHISPER FINAL [%d]: %s", self._chunk_count, self._last_final_text)
+            log.debug("WHISPER FINAL [{}]: {}", self._chunk_count, self._last_final_text)
 
         return result
 
