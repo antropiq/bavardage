@@ -5,11 +5,11 @@ French speech-to-text project supporting **Vosk Kaldi** and **Whisper** engines 
 ## Structure
 
 ```
-main_vosk.py     # Terminal-based transcription (PyAudio + Vosk/Whisper)
 start.py         # Cross-platform launcher (server + browser + cleanup)
 start.ps1        # Windows PowerShell launcher
 src/
-  server.py      # aiohttp server (HTTP + WebSocket)
+  server.py      # aiohttp server (HTTP + WebSocket) + --console entry point
+  console.py     # Console mode: terminal transcription using src modules
   server_app.py  # ServerApp orchestration
   session_manager.py     # WebSocket session management
   base_engine.py # Abstract engine interface
@@ -46,11 +46,16 @@ llm-migration-layer-todo-list.md  # Implementation tracking
 pip install -r requirements.txt
 
 # Run terminal transcription (direct mic → Vosk, no browser needed)
-python main_vosk.py
+python -m src.console
 
 # Run terminal transcription with Whisper
-pip install whispercpp numpy
-python main_vosk.py --engine whisper --whisper-model path/to/ggml-base.bin
+python -m src.console --engine whisper --whisper-model small
+
+# Run terminal transcription via start.py
+python start.py --console
+
+# Run terminal transcription via server.py
+python src/server.py --console --engine whisper
 
 # Run web server (HTTP + WebSocket on port 8765, opens browser, auto-closes)
 python start.py
@@ -137,12 +142,14 @@ Both processors implement the `BaseProcessor` interface (`src/base_processor.py`
 
 This design makes engines and processors plug-and-play interchangeable.
 
-### Terminal mode (`main_vosk.py`)
+### Console mode (`src/console.py`)
 
+- Accessible via `python -m src.console`, `python src/server.py --console`, or `python start.py --console`
 - Defaults to Vosk with `vosk-model-small-fr-0.22`
 - Opens PyAudio stream at 16kHz mono, 4000 bytes per read
+- Uses existing `src/` modules: `VoskEngine`/`WhisperEngine` + `AudioProcessor`/`WhisperProcessor`
 - With Vosk: `KaldiRecognizer.AcceptWaveform()` → `FinalResult()` for completed sentences, `PartialResult()` for live text
-- With Whisper: accumulates audio chunks and transcribes via faster-whisper (CTranslate2) when ≥1s of audio is buffered
+- With Whisper: uses `WhisperRecognizer` with silence-based triggering
 - Final results printed in **bold yellow** with ANSI escape codes
 - Partial results overwrite the terminal line with `\r` (carriage return)
 - Exits on `Ctrl+C`
@@ -185,11 +192,11 @@ This design makes engines and processors plug-and-play interchangeable.
 
 ## Gotchas
 
-- **Never name a script `vosk.py`** — it shadows the `vosk` package and causes a circular import (`ImportError: cannot import name 'Model' from partially initialized module 'vosk'`). This is why the original `vosk.py` was renamed to `main_vosk.py`.
+- **Never name a script `vosk.py`** — it shadows the `vosk` package and causes a circular import (`ImportError: cannot import name 'Model' from partially initialized module 'vosk'`). This is why the original `vosk.py` was renamed to `main_vosk.py` and later moved to `src/console.py`.
 - **Vosk model**: `vosk-model-small-fr-0.22/` is ~100MB. Listed in `.gitignore`. Download from https://alphacephei.com/vosk/models (README.txt has the link).
-- **stdout flushing is critical** — `main_vosk.py` calls `sys.stdout.flush()` explicitly because real-time output depends on it. Don't remove.
-- **`main_vosk.py` partial results use `\r`** — overwrites the terminal line with carriage return. This won't work in piped/redirected output.
-- **Microphone init blocks** — `main_vosk.py` opens the PyAudio stream at startup, which blocks until the mic is ready.
+- **stdout flushing is critical** — `src/console.py` calls `sys.stdout.flush()` explicitly because real-time output depends on it. Don't remove.
+- **`src/console.py` partial results use `\r`** — overwrites the terminal line with carriage return. This won't work in piped/redirected output.
+- **Microphone init blocks** — `src/console.py` opens the PyAudio stream at startup, which blocks until the mic is ready.
 - **Single `requirements.txt`** — all dependencies (`vosk`, `pyaudio`, `aiohttp`, `faster-whisper`, `numpy`) are in the root file. Install once.
 - **Audio format** — browser sends raw PCM s16le (little-endian signed 16-bit) at 16kHz mono. The client does linear interpolation resampling from the device's native sample rate.
 - **Server stays alive after disconnect** — after a client stops recording, the server remains running indefinitely, allowing reconnection. Server only stops when stopped with Ctrl+C.

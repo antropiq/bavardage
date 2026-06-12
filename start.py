@@ -65,6 +65,16 @@ def main() -> None:
         subprocess.run([_find_python(), str(SERVER_SCRIPT), "--help"], env=env)
         sys.exit(0)
 
+    # If --console is requested, run console mode directly (no server)
+    if "--console" in sys.argv[1:]:
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(PROJECT_ROOT)
+        try:
+            subprocess.run([_find_python(), str(SERVER_SCRIPT)] + sys.argv[1:], env=env, cwd=str(PROJECT_ROOT))
+        except KeyboardInterrupt:
+            pass
+        sys.exit(0)
+
     # Parse --ssl flag if present
     use_ssl = "--ssl" in sys.argv[1:]
     scheme = "https" if use_ssl else "http"

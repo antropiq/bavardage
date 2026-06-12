@@ -39,6 +39,7 @@ class ParsedArgs:
     ssl_certfile: str | None
     ssl_keyfile: str | None
     debug: bool
+    console: bool
 
 
 def _build_typer_app():
@@ -62,6 +63,7 @@ def _build_typer_app():
         ssl_certfile: str | None = typer.Option(None, "--ssl-certfile", help="Path to SSL certificate file", rich_help_panel="SSL"),
         ssl_keyfile: str | None = typer.Option(None, "--ssl-keyfile", help="Path to SSL private key file", rich_help_panel="SSL"),
         debug: bool = typer.Option(False, "--debug", help="Enable DEBUG-level logging", rich_help_panel="Logging"),
+        console: bool = typer.Option(False, "--console", help="Run in console mode (terminal transcription, no server)", rich_help_panel="Console"),
     ):
         if engine not in ("vosk", "whisper"):
             raise typer.BadParameter(f"Invalid engine: {engine}. Must be one of: vosk, whisper")
@@ -81,6 +83,7 @@ def _build_typer_app():
             ssl_certfile=ssl_certfile,
             ssl_keyfile=ssl_keyfile,
             debug=debug,
+            console=console,
         )
 
     return app
@@ -107,11 +110,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.console:
+        _run_console_mode(args)
+        return
     log_level = "DEBUG" if args.debug else "INFO"
     logger.remove()
     logger.add(sys.stderr, level=log_level, format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
     app = ServerApp.from_args(args)
     app.run()
+
+
+def _run_console_mode(args: ParsedArgs) -> None:
+    """Run in console mode using the console module."""
+    try:
+        from .console import main as console_main
+    except ImportError:
+        from src.console import main as console_main
+
+    console_argv = ["--engine", args.engine]
+    if args.whisper_model:
+        console_argv += ["--whisper-model", args.whisper_model]
+    if args.whisper_language:
+        console_argv += ["--whisper-language", args.whisper_language]
+    if args.debug:
+        console_argv.append("--debug")
+    console_main(console_argv)
 
 
 def _typer_main() -> None:
@@ -131,8 +154,23 @@ if __name__ == "__main__":
     if isinstance(result, int):
         sys.exit(result)
     args = result
-    log_level = "DEBUG" if args.debug else "INFO"
-    logger.remove()
-    logger.add(sys.stderr, level=log_level, format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
-    app = ServerApp.from_args(args)
-    app.run()
+    if args.console:
+        try:
+            from .console import main as console_main
+        except ImportError:
+            from src.console import main as console_main
+
+        console_argv = ["--engine", args.engine]
+        if args.whisper_model:
+            console_argv += ["--whisper-model", args.whisper_model]
+        if args.whisper_language:
+            console_argv += ["--whisper-language", args.whisper_language]
+        if args.debug:
+            console_argv.append("--debug")
+        console_main(console_argv)
+    else:
+        log_level = "DEBUG" if args.debug else "INFO"
+        logger.remove()
+        logger.add(sys.stderr, level=log_level, format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
+        app = ServerApp.from_args(args)
+        app.run()
