@@ -111,6 +111,7 @@ class ServerApp:
         self._app: web.Application | None = None
         self._runner: web.AppRunner | None = None
         self._ssl_context = ssl_context
+        self._sessions: dict[str, dict] = {}
 
     @property
     def engine(self) -> BaseEngine:
@@ -125,6 +126,7 @@ class ServerApp:
         self._app.router.add_static('/static/', str(STATIC_DIR), name='static')
         self._app.router.add_get("/", self._index_handler)
         self._app.router.add_get("/health", self._health_handler)
+        self._app.router.add_get("/stats", self._stats_handler)
         self._app.router.add_post("/api/llm-chat", self._llm_chat_handler)
         self._app.router.add_get("/ws", self._websocket_handler)
         return self._app
@@ -148,6 +150,9 @@ class ServerApp:
         )
         await session._setup()
 
+        session_id = f"{client_ip}:{id(session)}"
+        self._sessions[session_id] = {"session": session, "start_time": asyncio.get_event_loop().time()}
+
         chunk_count = 0
         try:
             async for msg in ws:
@@ -160,6 +165,7 @@ class ServerApp:
             log.exception("WebSocket error after {} chunks: {}", chunk_count, exc)
         finally:
             await session.close()
+            self._sessions.pop(session_id, None)
             log.info("Client disconnected")
 
         return ws
@@ -205,6 +211,34 @@ class ServerApp:
             "llm_enabled": self._llm_processor is not None and self._llm_processor.enabled,
         }
         return web.json_response(response, status=status_code)
+
+    async def _stats_handler(self, request: web.Request) -> web.Response:
+        """Stats endpoint — expose server-wide and per-session statistics."""
+        import time
+
+        loop = asyncio.get_event_loop()
+        now = loop.time()
+
+        sessions = []
+        total_chunks = 0
+        for sid, info in self._sessions.items():
+            session = info["session"]
+            duration = now - info["start_time"]
+            stats = session.get_stats()
+            sessions.append({
+                "id": sid,
+                "duration_seconds": round(duration, 1),
+                "chunks_processed": stats.get("chunks", 0),
+                "last_final_text": stats.get("last_final", ""),
+            })
+            total_chunks += stats.get("chunks", 0)
+
+        response = {
+            "active_sessions": len(sessions),
+            "total_chunks_processed": total_chunks,
+            "sessions": sessions,
+        }
+        return web.json_response(response)
 
     async def _index_handler(self, request: web.Request) -> web.FileResponse:
         """Serve index.html at root path."""

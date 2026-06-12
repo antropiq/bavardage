@@ -183,8 +183,9 @@ def test_main_creates_server_app():
                 llm_buffer_min=20,
                 ssl=False,
                 ssl_certfile=None,
-                ssl_keyfile=None,
+                 ssl_keyfile=None,
                 debug=False,
+                console=False,
             )
             from src.server import main
             main()

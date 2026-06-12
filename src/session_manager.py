@@ -30,12 +30,17 @@ class SessionManager:
         self._recognizer = None
         self._processor = None  # initialized in _setup
         self._chunk_count = 0
+        self._reset_count = 0
         self._last_final_text: str = ""
         self._last_partial_words: list[str] = []
 
     @property
     def chunk_count(self) -> int:
         return self._chunk_count
+
+    @property
+    def reset_count(self) -> int:
+        return self._reset_count
 
     async def _setup(self) -> None:
         """Create a fresh recognizer and processor for this session."""
@@ -144,6 +149,7 @@ class SessionManager:
             log.debug("Resetting recognizer (chunk {})", self._chunk_count)
             await self._reset_recognizer()
             self._processor._last_reset_time = now
+            self._reset_count += 1
 
         # Process audio chunk
         result = self._processor.process_chunk(data)
@@ -197,5 +203,6 @@ class SessionManager:
         """Return session statistics."""
         return {
             "chunks": self._chunk_count,
+            "resets": self._reset_count,
             "last_final": self._last_final_text,
         }
