@@ -3,6 +3,7 @@
  *
  * - Resample audio from AudioContext sample rate to 16 kHz
  * - Convert Float32 → Int16 PCM
+ * - RMS-based Voice Activity Detection (VAD) — only sends audio during speech
  * - Emit fixed-size 1024-sample chunks via postMessage
  */
 class ResampleProcessor extends AudioWorkletProcessor {
@@ -18,6 +19,42 @@ class ResampleProcessor extends AudioWorkletProcessor {
         this.inputOffset = 0;
         // Buffer to hold input across process() calls
         this.inputBuffer = new Float32Array(0);
+
+        // VAD (Voice Activity Detection) configuration
+        this.vadEnabled = true;
+        this.speechThreshold = 0.008;   // RMS above this → speech
+        this.silenceThreshold = 0.003;  // RMS below this → silence (hysteresis)
+        this.isSpeaking = false;         // Current VAD state
+        this.speechFrameCount = 0;       // Frames spent in speech state (debounce)
+        this.speechFramesNeeded = 3;     // Frames above threshold before declaring speech
+        this.attenuationFactor = 0.02;   // Multiply silence audio by this (keep stream alive for Vosk)
+    }
+
+    /**
+     * Calculate RMS (Root Mean Square) energy of a Float32Array.
+     */
+    _calculateRMS(samples) {
+        let sum = 0;
+        for (let i = 0; i < samples.length; i++) {
+            const s = samples[i];
+            sum += s * s;
+        }
+        return Math.sqrt(sum / samples.length);
+    }
+
+    /**
+     * Handle messages from the main thread to configure VAD.
+     */
+    static get maxInputs() { return 1; }
+
+    onmessage(event) {
+        const msg = event.data;
+        if (msg.type === 'vad-config') {
+            if (msg.vadEnabled !== undefined) this.vadEnabled = msg.vadEnabled;
+            if (msg.speechThreshold !== undefined) this.speechThreshold = msg.speechThreshold;
+            if (msg.silenceThreshold !== undefined) this.silenceThreshold = msg.silenceThreshold;
+            this.port.postMessage({ type: 'vad-config-ack' });
+        }
     }
 
     process(inputs, outputs) {
@@ -88,6 +125,55 @@ class ResampleProcessor extends AudioWorkletProcessor {
         } else {
             this.inputBuffer = new Float32Array(0);
             this.inputOffset = 0;
+        }
+
+        // --- VAD: Decide whether to send audio ---
+        if (this.vadEnabled && pcm.length > 0) {
+            // Calculate RMS on the full resampled buffer for VAD decision
+            const rms = this._calculateRMS(resampled);
+
+            if (this.isSpeaking) {
+                // We're in speech state — stay if above speechThreshold
+                if (rms < this.silenceThreshold) {
+                    this.speechFrameCount++;
+                    if (this.speechFrameCount >= this.speechFramesNeeded) {
+                        this.isSpeaking = false;
+                        this.speechFrameCount = 0;
+                        this.port.postMessage({ type: 'vad-state', speaking: false });
+                    }
+                }
+            } else {
+                // We're in silence state — switch to speech if above speechThreshold
+                if (rms > this.speechThreshold) {
+                    this.speechFrameCount++;
+                    if (this.speechFrameCount >= this.speechFramesNeeded) {
+                        this.isSpeaking = true;
+                        this.speechFrameCount = 0;
+                        this.port.postMessage({ type: 'vad-state', speaking: true });
+                    }
+                }
+            }
+
+            // During silence, attenuate audio instead of dropping it.
+            // This keeps the audio stream continuous so Vosk's internal VAD
+            // can still detect silence boundaries and finalize sentences,
+            // while reducing ambient noise that causes hallucinations.
+            if (!this.isSpeaking) {
+                const attenuated = new Int16Array(pcm.length);
+                for (let i = 0; i < pcm.length; i++) {
+                    attenuated[i] = Math.round(pcm[i] * this.attenuationFactor);
+                }
+                // Send attenuated audio in chunks
+                for (let offset = 0; offset < attenuated.length; offset += this.chunkSize) {
+                    const end = Math.min(offset + this.chunkSize, attenuated.length);
+                    const chunk = attenuated.subarray(offset, end);
+                    this.port.postMessage({
+                        type: 'audio',
+                        data: chunk.buffer,
+                    }, [chunk.buffer]);
+                }
+                return true;
+            }
         }
 
         // Send chunks to main thread

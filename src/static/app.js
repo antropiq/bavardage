@@ -15,6 +15,7 @@ let modelReady = false;
 let pingInterval = null;
 let lastPartialText = "";
 let llmEnabled = false;
+let vadSpeaking = false;
 
 const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 const HEALTH_URL = `/health`;
@@ -271,7 +272,7 @@ async function initAudio() {
     console.log("[app] MediaStreamSource created");
 
     // Load the AudioWorklet module
-    const workletUrl = `/static/audio-processor.js?v=7`;
+    const workletUrl = `/static/audio-processor.js?v=11`;
     try {
         await audioCtx.audioWorklet.addModule(workletUrl);
         console.log("[app] AudioWorklet module loaded");
@@ -299,6 +300,13 @@ async function initAudio() {
             totalBytes += msg.data.byteLength;
             ws.send(msg.data);
         }
+        if (msg.type === 'vad-state') {
+            vadSpeaking = msg.speaking;
+            const indicator = document.getElementById('vadIndicator');
+            if (indicator) {
+                indicator.className = `vad-indicator ${vadSpeaking ? 'speaking' : ''}`;
+            }
+        }
     };
 
     // Error handler on the worklet port
@@ -307,6 +315,15 @@ async function initAudio() {
         console.error("[app] Worklet port error — stopping recording");
         stopRecording();
     };
+
+    // Configure VAD on the worklet
+    audioWorkletNode.port.postMessage({
+        type: 'vad-config',
+        vadEnabled: true,
+        speechThreshold: 0.008,
+        silenceThreshold: 0.003,
+    });
+    console.log("[app] VAD enabled (speech>0.008, silence>0.003)");
 
     // Connect: source → worklet (no destination — use headphones if you need monitoring)
     source.connect(audioWorkletNode);

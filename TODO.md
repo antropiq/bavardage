@@ -1,11 +1,27 @@
 # TODO — Realtime Speech Transcription Enhancements
 
+## 📋 Remaining
+
+| # | Enhancement | Priority |
+|---|---|---|
+| 3 | **High-quality resampling** | Low |
+| 4 | **Audio preprocessing: high-pass filter + AGC** | Medium |
+| 5 | **Use larger French model** | Medium |
+| 6 | **Reset on silence boundaries** | Medium |
+| 7 | **Custom language model / hotwords** | Low |
+| 8 | **Tune Vosk parameters** | Low |
+| 10 | **Move audio processing to Web Worker** | Medium |
+| 15 | **Multi-client resource limits** | Low |
+| 18 | **Audio format validation** | Low |
+
+---
+
 ## 🎯 Accuracy Enhancements
 
 | # | Enhancement | Why | DONE |
 |---|---|---|---|
-| 1 | **Client-side Voice Activity Detection (VAD)** | Vosk processes silence as speech, causing hallucinated words. Only sending audio during actual speech dramatically improves accuracy. |   |
-| 2 | **RMS/energy-based silence detection** | Skip sending silent chunks entirely — reduces noise floor confusing the recognizer. |   |
+| 1 | **Client-side Voice Activity Detection (VAD)** | Vosk processes silence as speech, causing hallucinated words. Only sending audio during actual speech dramatically improves accuracy. | X |
+| 2 | **RMS/energy-based silence detection** | Skip sending silent chunks entirely — reduces noise floor confusing the recognizer. | X |
 | 3 | **High-quality resampling** | Linear interpolation in `audio-processor.js:62-68` is basic. At least-order is fine for real-time, but a better algorithm (e.g., sinc or Web Audio's native resampling) would preserve more detail. |   |
 | 4 | **Audio preprocessing: high-pass filter + AGC** | Remove low-frequency hum (fan, AC) and normalize varying mic levels so Vosk gets consistent amplitude. |   |
 | 5 | **Use larger French model** | `vosk-model-small-fr-0.22` is fast but less accurate. Medium/large models would improve word error rate. |   |

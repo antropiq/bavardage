@@ -135,6 +135,29 @@ body {
     border-color: #334155;
 }
 
+/* ── VAD Indicator ───────────────────────────────────── */
+
+.vad-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #475569;
+    margin-right: 0.75rem;
+    transition: background 0.15s ease;
+    flex-shrink: 0;
+}
+
+.vad-indicator.speaking {
+    background: #22c55e;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
+    animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 0 4px rgba(34, 197, 94, 0.4); }
+    50% { box-shadow: 0 0 12px rgba(34, 197, 94, 0.8); }
+}
+
 /* ── Main output ─────────────────────────────────────── */
 
 main {
