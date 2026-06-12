@@ -37,6 +37,12 @@ if (-not (Test-Path $venv)) {
     exit 1
 }
 
+# Handle --help / -h
+if ($args -contains "--help" -or $args -contains "-h") {
+    & $venv $server --help
+    exit 0
+}
+
 Write-Host "Starting transcription server..." -ForegroundColor Cyan
 $serverProcess = Start-Process -FilePath $venv -ArgumentList $server -PassThru
 

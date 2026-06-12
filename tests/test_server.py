@@ -15,7 +15,7 @@ from src.server import parse_args
 def _parse(argv: list[str]) -> argparse.Namespace:
     """Helper to parse a custom argument list."""
     with patch.object(sys, "argv", ["server"] + argv):
-        return parse_args()
+        return parse_args(argv)
 
 
 # ── Tests: Default arguments ─────────────────────────────────────────────────
@@ -54,7 +54,7 @@ def test_engine_whisper():
 def test_engine_invalid_exits():
     with patch.object(sys, "argv", ["server", "--engine", "invalid"]):
         try:
-            parse_args()
+            parse_args(["--engine", "invalid"])
         except SystemExit:
             pass
 

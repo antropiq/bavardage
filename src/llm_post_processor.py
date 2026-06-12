@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-import aiohttp
+from openai import AsyncOpenAI, APIError, APITimeoutError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 log = logging.getLogger(__name__)
 
@@ -26,14 +27,19 @@ class LLMPostProcessor:
         timeout: float = 5.0,
         max_retries: int = 1,
     ) -> None:
-        self._api_url = api_url.rstrip("/")
+        base_url = api_url.rstrip("/")
+        self._api_url = base_url
         self._api_key = api_key
         self._model = model
         self._system_prompt = system_prompt or self._default_system_prompt()
         self._timeout = timeout
         self._max_retries = max_retries
         self._enabled = bool(api_url)
-        self._session: aiohttp.ClientSession | None = None
+        if self._enabled:
+            client_key = api_key or "sk-dummy-key-for-testing"
+            self._client = AsyncOpenAI(base_url=f"{base_url}/v1", api_key=client_key)
+        else:
+            self._client = None  # type: ignore[assignment]
         log.debug(
             "LLMPostProcessor initialized: url=%s model=%s enabled=%s",
             self._api_url,
@@ -44,12 +50,6 @@ class LLMPostProcessor:
     @property
     def enabled(self) -> bool:
         return self._enabled
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        """Ensure we have a valid aiohttp ClientSession."""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
 
     @staticmethod
     def _default_system_prompt() -> str:
@@ -81,43 +81,36 @@ class LLMPostProcessor:
                 await asyncio.sleep(0.5 * (attempt + 1))
             except Exception as e:
                 log.warning("LLM call failed (attempt %d/%d): %s", attempt + 1, self._max_retries + 1, e)
-                if attempt == self._max_retries:
-                    return raw_text
-                await asyncio.sleep(0.5 * (attempt + 1))
+                return raw_text
 
         return raw_text
 
-    async def _call_llm(self, raw_text: str, system_prompt: str | None = None) -> dict:
-        """Call the OpenAI-compatible API."""
-        url = f"{self._api_url}/v1/chat/completions"
-        headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
-
-        messages = [
-            {"role": "system", "content": system_prompt or self._system_prompt},
-            {"role": "user", "content": raw_text},
-        ]
-
-        payload = {
-            "model": self._model,
-            "messages": messages,
-            "max_tokens": 1024,
-            "temperature": 0.0,
-        }
-
-        session = await self._ensure_session()
-        timeout_obj = aiohttp.ClientTimeout(total=self._timeout)
-        async with session.post(url, json=payload, headers=headers, timeout=timeout_obj) as resp:
-            if resp.status >= 400:
-                error_body = await resp.text()
-                raise Exception(f"LLM API error {resp.status}: {error_body[:500]}")
-            return await resp.json()
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=5.0),
+        retry=retry_if_exception_type((APIError, APITimeoutError)),
+        reraise=True,
+    )
+    async def _call_llm(self, raw_text: str, system_prompt: str | None = None) -> object:
+        """Call the OpenAI-compatible API with automatic retry on failure."""
+        response = await self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": system_prompt or self._system_prompt},
+                {"role": "user", "content": raw_text},
+            ],
+            max_tokens=1024,
+            temperature=0.0,
+            timeout=self._timeout,
+        )
+        return response
 
     @staticmethod
-    def _extract_text(response: dict) -> str:
+    def _extract_text(response: object) -> str:
         """Extract text from LLM API response."""
         try:
-            return response["choices"][0]["message"]["content"].strip()
-        except (KeyError, IndexError):
+            choice = response.choices[0]
+            content = choice.message.content
+            return content.strip() if content else ""
+        except (AttributeError, IndexError):
             return ""

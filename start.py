@@ -41,27 +41,35 @@ def wait_for_server(timeout: float = 30) -> bool:
     return False
 
 
-def main() -> None:
-    # Parse --ssl flag if present
-    use_ssl = "--ssl" in sys.argv[1:]
-    scheme = "https" if use_ssl else "http"
-
-    # Resolve Python executable: prefer venv, fall back to sys.executable
+def _find_python() -> str:
+    """Resolve Python executable: prefer venv, fall back to sys.executable."""
     venv_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
     if sys.platform == "win32":
         venv_unix = PROJECT_ROOT / ".venv" / "bin" / "python"
         if venv_python.exists():
-            python_exe = str(venv_python)
+            return str(venv_python)
         elif venv_unix.exists():
-            python_exe = str(venv_unix)
-        else:
-            python_exe = sys.executable
+            return str(venv_unix)
     else:
         venv_unix = PROJECT_ROOT / ".venv" / "bin" / "python"
         if venv_unix.exists():
-            python_exe = str(venv_unix)
-        else:
-            python_exe = sys.executable
+            return str(venv_unix)
+    return sys.executable
+
+
+def main() -> None:
+    # If --help is requested, delegate to the server directly (no subprocess)
+    if "--help" in sys.argv[1:] or "-h" in sys.argv[1:]:
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(PROJECT_ROOT)
+        subprocess.run([_find_python(), str(SERVER_SCRIPT), "--help"], env=env)
+        sys.exit(0)
+
+    # Parse --ssl flag if present
+    use_ssl = "--ssl" in sys.argv[1:]
+    scheme = "https" if use_ssl else "http"
+
+    python_exe = _find_python()
 
     if not Path(python_exe).exists():
         print(f"ERROR: Python not found. Checked: {python_exe}", file=sys.stderr)
