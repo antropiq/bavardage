@@ -2,8 +2,7 @@ const OutputHandler = (() => {
     const outputEl = document.getElementById("output");
 
     let cursorPos = 0;
-    let _pendingFinal = null;
-    let _pendingCursor = null;
+    let _pendingStack = [];
     let _finalTimeout = null;
     let llmEnabled = false;
 
@@ -23,32 +22,47 @@ const OutputHandler = (() => {
     function handleFinal(data) {
         const startCursor = finalizeRaw(data.text);
         if (llmEnabled) {
-            _pendingFinal = data.text;
-            _pendingCursor = startCursor;
+            _pendingStack.push({ text: data.text, cursorPos: startCursor });
             if (_finalTimeout) {
                 clearTimeout(_finalTimeout);
             }
             _finalTimeout = setTimeout(() => {
-                if (_pendingFinal !== null) {
-                    outputEl.textContent = outputEl.textContent.slice(0, _pendingCursor);
-                    cursorPos = _pendingCursor;
-                    _pendingFinal = null;
-                    _pendingCursor = null;
+                if (_pendingStack.length > 0) {
+                    const pending = _pendingStack[0];
+                    outputEl.textContent = outputEl.textContent.slice(0, pending.cursorPos);
+                    cursorPos = pending.cursorPos;
+                    _pendingStack = [];
                 }
-            }, 3000);
+            }, 2000);
         }
     }
 
     function handleFinalLlm(data) {
-        if (_pendingCursor !== null) {
+        if (_pendingStack.length > 0) {
             clearTimeout(_finalTimeout);
             _finalTimeout = null;
-            cursorPos = _pendingCursor;
-            replaceFromCursor(data.text.replace(/\r?\n/g, " ").trim());
-            outputEl.textContent += " ";
-            cursorPos = outputEl.textContent.length;
-            _pendingFinal = null;
-            _pendingCursor = null;
+            const pending = _pendingStack.shift();
+            const rawLen = pending.text.replace(/\r?\n/g, " ").trim().length;
+            const llmText = data.text.replace(/\r?\n/g, " ").trim();
+            const llmLen = llmText.length;
+            const delta = llmLen - rawLen;
+
+            // Update cursor positions for all remaining pending entries
+            for (const entry of _pendingStack) {
+                entry.cursorPos += delta;
+            }
+
+            // Find the end of this fragment (start of next or end of DOM)
+            const nextCursor = _pendingStack.length > 0
+                ? _pendingStack[0].cursorPos
+                : outputEl.textContent.length;
+
+            // Replace only this fragment's portion while preserving subsequent fragments
+            const before = outputEl.textContent.slice(0, pending.cursorPos);
+            const after = outputEl.textContent.slice(nextCursor);
+            outputEl.textContent = before + llmText + " " + after;
+
+            cursorPos = pending.cursorPos + llmLen + 1 + after.length;
         }
     }
 
@@ -79,9 +93,8 @@ const OutputHandler = (() => {
     }
 
     function clearLastLine() {
-        if (_pendingCursor !== null) {
-            _pendingFinal = null;
-            _pendingCursor = null;
+        if (_pendingStack.length > 0) {
+            _pendingStack = [];
             if (_finalTimeout) {
                 clearTimeout(_finalTimeout);
                 _finalTimeout = null;
@@ -97,8 +110,7 @@ const OutputHandler = (() => {
 
     function clearAll() {
         outputEl.textContent = "";
-        _pendingFinal = null;
-        _pendingCursor = null;
+        _pendingStack = [];
         cursorPos = 0;
         if (_finalTimeout) {
             clearTimeout(_finalTimeout);
@@ -107,8 +119,7 @@ const OutputHandler = (() => {
     }
 
     function reset() {
-        _pendingFinal = null;
-        _pendingCursor = null;
+        _pendingStack = [];
         cursorPos = 0;
         if (_finalTimeout) {
             clearTimeout(_finalTimeout);
