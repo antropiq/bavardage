@@ -84,8 +84,10 @@ def test_parser_all_flags():
 def test_main_dispatches_to_vosk_by_default(mock_wr, mock_vk):
     console_mod = __import__("src.console", fromlist=["main"])
     console_mod.main([])
-    mock_vk.assert_called_once_with(None)
+    mock_vk.assert_called_once()
     mock_wr.assert_not_called()
+    called_args = mock_vk.call_args[0][0]
+    assert called_args.engine == "vosk"
 
 
 @patch("src.console._run_vosk_console")

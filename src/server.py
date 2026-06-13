@@ -42,6 +42,10 @@ class ParsedArgs:
     ssl_keyfile: str | None
     debug: bool
     console: bool
+    user_speaker: bool
+    volume: float
+    device: int
+    window: bool
 
 
 def _build_typer_app():
@@ -67,6 +71,10 @@ def _build_typer_app():
         ssl_keyfile: str | None = typer.Option(None, "--ssl-keyfile", help="Path to SSL private key file", rich_help_panel="SSL"),
         debug: bool = typer.Option(False, "--debug", help="Enable DEBUG-level logging", rich_help_panel="Logging"),
         console: bool = typer.Option(False, "--console", help="Run in console mode (terminal transcription, no server)", rich_help_panel="Console"),
+        user_speaker: bool = typer.Option(False, "--user-speaker", help="Capture system speaker output (loopback) instead of microphone", rich_help_panel="Console"),
+        volume: float = typer.Option(1.0, "--volume", help="Input volume multiplier (default: 1.0, try 2.0-5.0 for loopback)", rich_help_panel="Console"),
+        device: int = typer.Option(None, "--device", help="Audio device index (skips interactive selection)", rich_help_panel="Console"),
+        window: bool = typer.Option(False, "--window", help="Run in GUI window mode (Tkinter)", rich_help_panel="Console"),
     ):
         if engine not in ("vosk", "whisper"):
             raise typer.BadParameter(f"Invalid engine: {engine}. Must be one of: vosk, whisper")
@@ -88,6 +96,10 @@ def _build_typer_app():
             ssl_keyfile=ssl_keyfile,
             debug=debug,
             console=console,
+            user_speaker=user_speaker,
+            volume=volume,
+            device=device,
+            window=window,
         )
 
     return app
@@ -138,12 +150,17 @@ def _run_console_mode(args: ParsedArgs) -> None:
     console_argv = ["--engine", args.engine]
     if args.vosk_model:
         console_argv += ["--vosk-model", args.vosk_model]
-    if args.whisper_model:
+    if args.engine == "whisper":
         console_argv += ["--whisper-model", args.whisper_model]
-    if args.whisper_language:
         console_argv += ["--whisper-language", args.whisper_language]
     if args.debug:
         console_argv.append("--debug")
+    if args.user_speaker:
+        console_argv.append("--user-speaker")
+    if args.volume != 1.0:
+        console_argv += ["--volume", str(args.volume)]
+    if args.device is not None:
+        console_argv += ["--device", str(args.device)]
     console_main(console_argv)
 
 
@@ -174,16 +191,36 @@ if __name__ == "__main__":
         except ImportError:
             from src.console import main as console_main
 
-        console_argv = ["--engine", args.engine]
+        console_argv = []
         if args.vosk_model:
             console_argv += ["--vosk-model", args.vosk_model]
-        if args.whisper_model:
-            console_argv += ["--whisper-model", args.whisper_model]
-        if args.whisper_language:
-            console_argv += ["--whisper-language", args.whisper_language]
         if args.debug:
             console_argv.append("--debug")
+        if args.user_speaker:
+            console_argv.append("--user-speaker")
+        if args.volume != 1.0:
+            console_argv += ["--volume", str(args.volume)]
+        if args.device is not None:
+            console_argv += ["--device", str(args.device)]
         console_main(console_argv)
+    elif args.window:
+        try:
+            from .tkwindow import main as window_main
+        except ImportError:
+            from src.tkwindow import main as window_main
+
+        window_argv = []
+        if args.vosk_model:
+            window_argv += ["--vosk-model", args.vosk_model]
+        if args.debug:
+            window_argv.append("--debug")
+        if args.user_speaker:
+            window_argv.append("--user-speaker")
+        if args.volume != 1.0:
+            window_argv += ["--volume", str(args.volume)]
+        if args.device is not None:
+            window_argv += ["--device", str(args.device)]
+        window_main(window_argv)
     else:
         log_level = "DEBUG" if args.debug else "INFO"
         logger.remove()

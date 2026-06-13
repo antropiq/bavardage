@@ -9,13 +9,14 @@ start.py         # Cross-platform launcher (server + browser + cleanup)
 start.ps1        # Windows PowerShell launcher
 src/
   server.py      # aiohttp server (HTTP + WebSocket) + --console entry point
-  console.py     # Console mode: terminal transcription using src modules
+  console.py     # Console mode: standalone Vosk terminal transcription
   server_app.py  # ServerApp orchestration
   session_manager.py     # WebSocket session management
   base_engine.py # Abstract engine interface
   base_processor.py      # Abstract processor interface
   vosk_engine.py         # Vosk model/loading/pooling
   whisper_engine.py      # faster-whisper (CTranslate2) model/loading
+  tkwindow.py            # Tkinter GUI: source dropdown + Start/Stop + live transcription
   audio_processor.py     # Audio chunk processing (Vosk)
   whisper_processor.py   # Audio chunk processing (Whisper)
   transcription_buffer.py  # Fragment accumulation & silence detection
@@ -54,14 +55,23 @@ python -m src.console
 # Run terminal transcription with custom Vosk model
 python -m src.console --vosk-model /path/to/vosk-model
 
-# Run terminal transcription with Whisper
-python -m src.console --engine whisper --whisper-model small
+# Run terminal transcription capturing system speaker output (loopback)
+python -m src.console --user-speaker --volume 3.0
 
 # Run terminal transcription via start.py
 python start.py --console
 
 # Run terminal transcription via server.py
-python src/server.py --console --engine whisper
+python src/server.py --console
+
+# Run GUI transcription window directly
+python src/tkwindow.py --vosk-model vosk-model-fr-0.22 --user-speaker
+
+# List available audio devices
+python src/tkwindow.py --list-devices
+
+# Run GUI with custom options
+python src/tkwindow.py --vosk-model /path/to/model --user-speaker --volume 3.0 --debug
 
 # Run web server (HTTP + WebSocket on port 8765, opens browser, auto-closes)
 python start.py
@@ -154,11 +164,10 @@ This design makes engines and processors plug-and-play interchangeable.
 ### Console mode (`src/console.py`)
 
 - Accessible via `python -m src.console`, `python src/server.py --console`, or `python start.py --console`
+- Standalone — no dependencies on other `src/` modules
 - Defaults to Vosk with `vosk-model-small-fr-0.22`
 - Opens PyAudio stream at 16kHz mono, 4000 bytes per read
-- Uses existing `src/` modules: `VoskEngine`/`WhisperEngine` + `AudioProcessor`/`WhisperProcessor`
-- With Vosk: `KaldiRecognizer.AcceptWaveform()` → `FinalResult()` for completed sentences, `PartialResult()` for live text
-- With Whisper: uses `WhisperRecognizer` with silence-based triggering
+- `KaldiRecognizer.AcceptWaveform()` → `FinalResult()` for completed sentences, `PartialResult()` for live text
 - Final results printed in **bold yellow** with ANSI escape codes
 - Partial results overwrite the terminal line with `\r` (carriage return)
 - Exits on `Ctrl+C`
@@ -208,6 +217,7 @@ This design makes engines and processors plug-and-play interchangeable.
 - **`src/console.py` partial results use `\r`** — overwrites the terminal line with carriage return. This won't work in piped/redirected output.
 - **Microphone init blocks** — `src/console.py` opens the PyAudio stream at startup, which blocks until the mic is ready.
 - **No build command** — this is a script-based project. Install with `pip install -e ".[dev]"`.
+- **Tkinter required for GUI** — `src/tkwindow.py` needs `python3-tk` installed on the system (`apt install python3-tk` on Debian/Ubuntu) and `ttkbootstrap` Python package (`pip install ttkbootstrap`). Uses the `cosmo` theme for a modern flat UI. Run directly: `python src/tkwindow.py`.
 - **CUDA support** — install `torch` with CUDA 12.8 via `pip install -e ".[dev,cuda]"` for GPU-accelerated Whisper mode (`--whisper-device cuda`).
 - **Audio format** — browser sends raw PCM s16le (little-endian signed 16-bit) at 16kHz mono. The client does linear interpolation resampling from the device's native sample rate.
 - **Server stays alive after disconnect** — after a client stops recording, the server remains running indefinitely, allowing reconnection. Server only stops when stopped with Ctrl+C.

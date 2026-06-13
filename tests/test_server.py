@@ -268,6 +268,7 @@ def test_main_creates_server_app():
                 ssl_keyfile=None,
                 debug=False,
                 console=False,
+                window=False,
             )
             main()
             mock_run.assert_called_once()
@@ -325,6 +326,7 @@ def test_main_debug_logging():
                 ssl_keyfile=None,
                 debug=True,
                 console=False,
+                window=False,
             )
             with patch("loguru.logger.remove") as mock_remove:
                 with patch("loguru.logger.add") as mock_add:
@@ -357,6 +359,10 @@ def test_run_console_mode_vosk():
         ssl_keyfile=None,
         debug=False,
         console=False,
+        user_speaker=False,
+        volume=1.0,
+        device=None,
+        window=False,
     )
     with patch("src.console.main") as mock_console:
         _run_console_mode(args)
@@ -386,6 +392,10 @@ def test_run_console_mode_with_vosk_model():
         ssl_keyfile=None,
         debug=False,
         console=False,
+        user_speaker=False,
+        volume=1.0,
+        device=None,
+        window=False,
     )
     with patch("src.console.main") as mock_console:
         _run_console_mode(args)
@@ -414,6 +424,10 @@ def test_run_console_mode_whisper():
         ssl_keyfile=None,
         debug=False,
         console=False,
+        user_speaker=False,
+        volume=1.0,
+        device=None,
+        window=False,
     )
     with patch("src.console.main") as mock_console:
         _run_console_mode(args)
@@ -444,6 +458,10 @@ def test_run_console_mode_with_debug():
         ssl_keyfile=None,
         debug=True,
         console=False,
+        user_speaker=False,
+        volume=1.0,
+        device=None,
+        window=False,
     )
     with patch("src.console.main") as mock_console:
         _run_console_mode(args)
@@ -515,6 +533,7 @@ def test_main_server_mode_via_typer():
                 ssl_keyfile=None,
                 debug=False,
                 console=False,
+                window=False,
             )
             main()
             mock_run.assert_called_once()
@@ -544,6 +563,7 @@ def test_typer_main_entry_point():
                 ssl_keyfile=None,
                 debug=False,
                 console=False,
+                window=False,
             )
             _typer_main()
             mock_run.assert_called_once()
@@ -601,6 +621,7 @@ def test_main_non_debug():
                 ssl_keyfile=None,
                 debug=False,
                 console=False,
+                window=False,
             )
             with patch("loguru.logger.remove") as mock_remove:
                 with patch("loguru.logger.add") as mock_add:
@@ -643,6 +664,10 @@ def test_run_console_mode_import_fallback():
         ssl_keyfile=None,
         debug=False,
         console=False,
+        user_speaker=False,
+        volume=1.0,
+        device=None,
+        window=False,
     )
     # The fallback import path (from src.console) is only taken when
     # running as a script (not as a package). We can't easily test this
