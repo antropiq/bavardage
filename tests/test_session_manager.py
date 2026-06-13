@@ -591,7 +591,7 @@ async def test_send_final_with_llm():
     sm._ws = ws
 
     await sm._send_final("raw text")
-    llm.process.assert_called_with("raw text")
+    llm.process.assert_called_with("raw text", context="")
     ws.send_json.assert_called()
     call_args = ws.send_json.call_args[0][0]
     assert call_args["text"] == "polished text"

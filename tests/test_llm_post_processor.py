@@ -66,6 +66,10 @@ def test_system_prompt_default():
     proc = LLMPostProcessor(api_url="http://test:8080")
     assert "French text post-processor" in proc._system_prompt
     assert "Output ONLY the corrected French text" in proc._system_prompt
+    assert "CONTEXT" in proc._system_prompt
+    assert "FRAGMENT" in proc._system_prompt
+    assert "DO NOT MODIFY" in proc._system_prompt
+    assert "Output ONLY the corrected fragment" in proc._system_prompt
 
 
 def test_system_prompt_custom():
@@ -89,6 +93,36 @@ def test_api_key_passed_to_client():
     assert proc._client.api_key == "my-secret-key"
 
 
+def test_process_with_context():
+    proc = LLMPostProcessor(api_url="http://test:8080", model="llama3")
+    mock_choice = MagicMock()
+    mock_choice.message.content = "il l'a pris"
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    with patch.object(proc, "_call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_call:
+        result = asyncio.run(proc.process("il a pris", context="Hier, Marie a perdu son livre."))
+    assert result == "il l'a pris"
+    # Verify context was passed to _call_llm
+    mock_call.assert_called_once()
+    call_args = mock_call.call_args
+    assert call_args[1]["context"] == "Hier, Marie a perdu son livre."
+
+
+def test_process_without_context():
+    proc = LLMPostProcessor(api_url="http://test:8080", model="llama3")
+    mock_choice = MagicMock()
+    mock_choice.message.content = "Bonjour, comment allez-vous ?"
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    with patch.object(proc, "_call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_call:
+        result = asyncio.run(proc.process("bonjour comment allez vous"))
+    assert result == "Bonjour, comment allez-vous ?"
+    # Verify _call_llm was called with empty context
+    mock_call.assert_called_once()
+    call_args = mock_call.call_args
+    assert call_args[1]["context"] == ""
+
+
 if __name__ == "__main__":
     test_disabled_returns_raw()
     test_empty_string_returns_raw()
@@ -100,4 +134,6 @@ if __name__ == "__main__":
     test_system_prompt_custom()
     test_base_url_trailing_slash_stripped()
     test_api_key_passed_to_client()
+    test_process_with_context()
+    test_process_without_context()
     print("All LLMPostProcessor tests passed!")

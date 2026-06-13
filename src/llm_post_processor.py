@@ -69,23 +69,32 @@ class LLMPostProcessor:
     def _default_system_prompt() -> str:
         return (
             "You are a French text post-processor for speech recognition output. "
-            "Your ONLY task is to correct the text: add proper punctuation, fix capitalization, "
-            "and repair minor ASR errors. NEVER answer questions, add commentary, or change "
-            "the original meaning. Output ONLY the corrected French text — no greetings, "
-            "no explanations, no extra text."
+            "You receive two parts:\n"
+            "1. CONTEXT: previously transcribed and corrected text (DO NOT MODIFY)\n"
+            "2. FRAGMENT: a new piece of raw ASR output that needs correction\n\n"
+            "Your ONLY task is to correct the FRAGMENT: add proper punctuation, fix "
+            "capitalization, and repair minor ASR errors. Use the CONTEXT to understand "
+            "pronouns, references, and resolve ambiguities (ses/ces, ou/où, et/est, etc.).\n\n"
+            "CRITICAL: Output ONLY the corrected fragment. NEVER repeat the context. "
+            "NEVER answer questions, add commentary, or change the original meaning. "
+            "Output ONLY the corrected French text — no greetings, no explanations, no extra text."
         )
 
-    async def process(self, raw_text: str) -> str:
+    async def process(self, raw_text: str, context: str = "") -> str:
         """Send raw text to LLM and return polished text.
 
         On failure, returns the original ``raw_text`` (fallback).
+
+        Args:
+            raw_text: The ASR fragment to correct.
+            context: Previously corrected text for disambiguation.
         """
         if not self._enabled or not raw_text.strip():
             return raw_text
 
         for attempt in range(self._max_retries + 1):
             try:
-                response = await self._call_llm(raw_text)
+                response = await self._call_llm(raw_text, context=context)
                 polished = self._extract_text(response)
                 if polished:
                     return polished
@@ -105,14 +114,24 @@ class LLMPostProcessor:
         retry=retry_if_exception_type((APIError, APITimeoutError)),
         reraise=True,
     )
-    async def _call_llm(self, raw_text: str, system_prompt: str | None = None) -> object:
+    async def _call_llm(
+        self,
+        raw_text: str,
+        context: str = "",
+        system_prompt: str | None = None,
+    ) -> object:
         """Call the OpenAI-compatible API with automatic retry on failure."""
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": system_prompt or self._system_prompt},
+        ]
+        if context.strip():
+            messages.append({"role": "user", "content": f"Contexte: {context}\n\nFragment: {raw_text}"})
+        else:
+            messages.append({"role": "user", "content": raw_text})
+
         response = await self._client.chat.completions.create(
             model=self._model,
-            messages=[
-                {"role": "system", "content": system_prompt or self._system_prompt},
-                {"role": "user", "content": raw_text},
-            ],
+            messages=messages,
             max_tokens=1024,
             temperature=0.0,
             timeout=self._timeout,

@@ -33,6 +33,8 @@ class SessionManager:
         self._reset_count = 0
         self._last_final_text: str = ""
         self._last_partial_words: list[str] = []
+        # Sliding window of polished text for LLM context (max 2000 chars)
+        self._context_window: str = ""
 
     @property
     def chunk_count(self) -> int:
@@ -54,6 +56,7 @@ class SessionManager:
         self._chunk_count = 0
         self._last_final_text = ""
         self._last_partial_words = []
+        self._context_window = ""
 
         if self._llm_processor and self._llm_processor.enabled:
             log.debug("LLM post-processing enabled for session")
@@ -84,14 +87,17 @@ class SessionManager:
         # Borrow a new one
         self._recognizer = await self._engine.create_recognizer()
         self._processor = self._create_processor(self._recognizer)
+        # Reset LLM context on recognizer reset
+        self._context_window = ""
 
     async def close(self) -> None:
         """Return the recognizer, flush remaining buffer, and clean up."""
         # Flush any remaining text in the LLM buffer
         remaining = self._buffer.force_flush()
         if remaining and self._llm_processor:
-            polished = await self._llm_processor.process(remaining)
+            polished = await self._llm_processor.process(remaining, context=self._context_window)
             if polished:
+                self._update_context_window(polished)
                 log.debug("LLM flushed remaining text: {}", polished)
 
         # Flush any remaining audio in the Whisper processor (Vosk has none)
@@ -103,6 +109,23 @@ class SessionManager:
         if self._recognizer:
             await self._engine.return_recognizer(self._recognizer)
             self._recognizer = None
+
+    def _update_context_window(self, polished_text: str) -> None:
+        """Add polished text to the sliding context window for LLM.
+
+        Keeps the last 2000 characters to limit token usage.
+        """
+        if not polished_text:
+            return
+        window = self._context_window + " " + polished_text
+        if len(window) > 2000:
+            # Find a word boundary to avoid cutting mid-word
+            cutoff = 2000
+            while cutoff > 100 and window[cutoff] not in (" ", ".", ",", ";", "!", "?"):
+                cutoff -= 1
+            self._context_window = window[cutoff:].strip() if cutoff > 100 else window[-2000:].strip()
+        else:
+            self._context_window = window.strip()
 
     async def _send_final(self, text: str) -> None:
         """Send a final transcription result, optionally through LLM.
@@ -119,8 +142,9 @@ class SessionManager:
         # If LLM enabled, send corrected version as 'final_llm'
         if self._llm_processor and self._llm_processor.enabled:
             try:
-                polished = await self._llm_processor.process(text)
+                polished = await self._llm_processor.process(text, context=self._context_window)
                 if polished:
+                    self._update_context_window(polished)
                     await self._ws.send_json({"type": "final_llm", "text": polished})
                     return
             except Exception:
@@ -178,8 +202,10 @@ class SessionManager:
                     if self._llm_processor and self._llm_processor.enabled:
                         try:
                             log.info("LLM flushing buffer: {!r}", raw_text[:200])
-                            polished_text = await self._llm_processor.process(raw_text)
+                            polished_text = await self._llm_processor.process(raw_text, context=self._context_window)
                             log.info("LLM flushed: {!r}", polished_text[:200] if polished_text else "")
+                            if polished_text:
+                                self._update_context_window(polished_text)
                             # Send raw first, then LLM-corrected
                             await ws.send_json({"type": "final", "text": raw_text})
                             if polished_text:
@@ -194,8 +220,10 @@ class SessionManager:
                     if self._llm_processor and self._llm_processor.enabled:
                         try:
                             log.info("LLM processing fragment: {!r}", result["text"][:200])
-                            polished = await self._llm_processor.process(result["text"])
+                            polished = await self._llm_processor.process(result["text"], context=self._context_window)
                             log.info("LLM processed: {!r}", polished[:200] if polished else "")
+                            if polished:
+                                self._update_context_window(polished)
                             # Send raw first, then LLM-corrected
                             await ws.send_json({"type": "final", "text": result["text"]})
                             if polished:
