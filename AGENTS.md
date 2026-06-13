@@ -73,6 +73,18 @@ python src/tkwindow.py --list-devices
 # Run GUI with custom options
 python src/tkwindow.py --vosk-model /path/to/model --user-speaker --volume 3.0 --debug
 
+# Build standalone Linux binary (requires PyInstaller)
+pip install PyInstaller
+python scripts/build_tkwindow.py
+
+# Distribution notes:
+# - Requires python3-tk system package (apt install python3-tk)
+# - Requires PipeWire/PulseAudio (parec + pactl) on target system
+# - Binary bundles libvosk.so + all Python deps (NO model)
+# - User MUST provide model via --vosk-model at runtime
+# - Output: dist/vosk-tkwindow, dist/bavardage.png, dist/vosk-tkwindow.desktop
+# - ~58 MB standalone ELF, no Python installation needed on target
+
 # Run web server (HTTP + WebSocket on port 8765, opens browser, auto-closes)
 python start.py
 

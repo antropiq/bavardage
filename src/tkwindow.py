@@ -11,6 +11,7 @@ destruction/recreation, hence no flicker.
 from __future__ import annotations
 
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -178,10 +179,22 @@ class TkWindow:
 
     def _build_gui(self) -> ttk.Window:
         root = ttk.Window(themename="cosmo")
-        root.title("Vosk Transcription")
+        root.title("Bavardage")
         root.attributes("-topmost", True)
         root.minsize(480, 480)
         root.configure(bg="#000000")
+
+        # Set window icon
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "resources", "bavardage.png")
+        if not os.path.exists(icon_path):
+            # Fallback for PyInstaller bundled app
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "bavardage.png")
+        try:
+            icon = tk.PhotoImage(file=icon_path)
+            root.iconphoto(True, icon)
+            root._icon = icon  # prevent garbage collection
+        except Exception:
+            pass
 
         # Full-width, bottom-aligned window
         root.update_idletasks()
