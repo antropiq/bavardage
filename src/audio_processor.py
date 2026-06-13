@@ -6,6 +6,7 @@ with other processors (e.g. WhisperProcessor).
 
 from __future__ import annotations
 
+import asyncio
 import json
 from loguru import logger
 
@@ -41,20 +42,18 @@ class AudioProcessor(BaseProcessor):
         """Check if the recognizer should be reset based on the interval."""
         return now - self._last_reset_time >= self._reset_interval
 
-    def process_chunk(self, data: bytes) -> dict | None:
+    async def process_chunk(self, data: bytes) -> dict | None:
         """Process a single audio chunk. Returns a result dict or None.
 
-        Result dict format: {"type": "final" | "partial", "text": str}
-
-        Callers should check needs_reset() before calling this method.
+        Delegates blocking Vosk calls to a thread pool to avoid blocking
+        the event loop during high-throughput speech.
         """
         self._chunk_count += 1
-
-        accepted = self._recognizer.AcceptWaveform(data)
+        accepted = await asyncio.to_thread(self._recognizer.AcceptWaveform, data)
 
         if accepted:
-            return self._handle_accepted()
-        return self._handle_partial()
+            return await asyncio.to_thread(self._handle_accepted)
+        return await asyncio.to_thread(self._handle_partial)
 
     def _reset_recognizer(self) -> None:
         """Replace the recognizer with a fresh instance."""
@@ -74,7 +73,7 @@ class AudioProcessor(BaseProcessor):
             return None
 
         self._last_final_text = text
-        log.debug("FINAL [{}]: {}", self._chunk_count, text)
+        log.debug("FINAL [{}]", self._chunk_count)
         return {"type": "final", "text": text}
 
     def _handle_partial(self) -> dict | None:

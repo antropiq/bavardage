@@ -162,7 +162,7 @@ class SessionManager:
             self._reset_count += 1
 
         # Process audio chunk
-        result = self._processor.process_chunk(data)
+        result = await self._processor.process_chunk(data)
         if result and result["type"] == "final":
             log.info("FINAL result: {!r}", result["text"][:200])
 

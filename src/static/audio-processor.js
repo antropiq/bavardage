@@ -26,7 +26,7 @@ class ResampleProcessor extends AudioWorkletProcessor {
         this.silenceThreshold = 0.003;  // RMS below this → silence (hysteresis)
         this.isSpeaking = false;         // Current VAD state
         this.speechFrameCount = 0;       // Frames spent in speech state (debounce)
-        this.speechFramesNeeded = 3;     // Frames above threshold before declaring speech
+        this.speechFramesNeeded = 1;     // Frames above threshold before declaring speech
         this.attenuationFactor = 0.02;   // Multiply silence audio by this (keep stream alive for Vosk)
     }
 

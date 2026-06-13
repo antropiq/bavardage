@@ -227,7 +227,7 @@ async function initAudio() {
     console.log("[app] MediaStreamSource created");
 
     // Load the AudioWorklet module
-    const workletUrl = `/static/audio-processor.js?v=11`;
+    const workletUrl = `/static/audio-processor.js?v=12`;
     try {
         await audioCtx.audioWorklet.addModule(workletUrl);
         console.log("[app] AudioWorklet module loaded");

@@ -37,7 +37,7 @@ class WhisperProcessor(BaseProcessor):
         """Check if the recognizer should be reset based on the interval."""
         return now - self._last_reset_time >= self._reset_interval
 
-    def process_chunk(self, data: bytes) -> dict | None:
+    async def process_chunk(self, data: bytes) -> dict | None:
         """Process a single audio chunk. Returns a result dict or None.
 
         Delegates to the WhisperRecognizer which accumulates audio and
@@ -48,7 +48,7 @@ class WhisperProcessor(BaseProcessor):
 
         if result and result["type"] == "final":
             self._last_final_text = result["text"]
-            log.debug("WHISPER FINAL [{}]: {}", self._chunk_count, self._last_final_text)
+            log.debug("WHISPER FINAL [{}]", self._chunk_count)
 
         return result
 

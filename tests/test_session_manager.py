@@ -53,7 +53,7 @@ def make_llm_processor(enabled=True):
 def make_processor_mock():
     """Create a mock processor implementing BaseProcessor."""
     proc = MagicMock()
-    proc.process_chunk = MagicMock(return_value=None)
+    proc.process_chunk = AsyncMock(return_value=None)
     proc.needs_reset = MagicMock(return_value=False)
     proc.chunk_count = 0
     proc._last_reset_time = 0.0
@@ -279,7 +279,7 @@ async def test_handle_message_text_sends_to_processor():
     ws = make_mock_ws()
     sm = SessionManager(engine)
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(return_value=None)
+    sm._processor.process_chunk = AsyncMock(return_value=None)
 
     msg = MagicMock()
     msg.type = web.WSMsgType.TEXT
@@ -297,7 +297,7 @@ async def test_handle_message_binary_sends_bytes():
     ws = make_mock_ws()
     sm = SessionManager(engine)
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(return_value=None)
+    sm._processor.process_chunk = AsyncMock(return_value=None)
 
     msg = MagicMock()
     msg.type = web.WSMsgType.BINARY
@@ -349,7 +349,7 @@ async def test_handle_message_final_result_sent_to_client():
     ws = make_mock_ws()
     sm = SessionManager(engine)
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(
+    sm._processor.process_chunk = AsyncMock(
         return_value={"type": "final", "text": "bonjour le monde"}
     )
 
@@ -372,7 +372,7 @@ async def test_handle_message_partial_result_sent_to_client():
     ws = make_mock_ws()
     sm = SessionManager(engine)
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(
+    sm._processor.process_chunk = AsyncMock(
         return_value={"type": "partial", "text": "bonj..."}
     )
 
@@ -394,7 +394,7 @@ async def test_handle_message_no_result_no_send():
     ws = make_mock_ws()
     sm = SessionManager(engine)
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(return_value=None)
+    sm._processor.process_chunk = AsyncMock(return_value=None)
 
     msg = MagicMock()
     msg.type = web.WSMsgType.BINARY
@@ -420,7 +420,7 @@ async def test_handle_message_llm_polishes_final_text():
         buffer_config={"max_buffer_size": 10, "min_buffer_size": 1},
     )
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(
+    sm._processor.process_chunk = AsyncMock(
         return_value={"type": "final", "text": "bonjour le monde"}
     )
 
@@ -447,7 +447,7 @@ async def test_handle_message_llm_fallback_on_error():
     ws = make_mock_ws()
     sm = SessionManager(engine, llm_processor=llm)
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(
+    sm._processor.process_chunk = AsyncMock(
         return_value={"type": "final", "text": "raw text"}
     )
 
@@ -470,7 +470,7 @@ async def test_handle_message_no_llm_sends_raw():
     ws = make_mock_ws()
     sm = SessionManager(engine)  # no LLM
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(
+    sm._processor.process_chunk = AsyncMock(
         return_value={"type": "final", "text": "raw text"}
     )
 
@@ -496,7 +496,7 @@ async def test_handle_message_triggers_reset():
     sm._recognizer = MagicMock()
     sm._processor = make_processor_mock()
     sm._processor.needs_reset = MagicMock(return_value=True)
-    sm._processor.process_chunk = MagicMock(
+    sm._processor.process_chunk = AsyncMock(
         return_value={"type": "final", "text": "after reset"}
     )
 
@@ -524,7 +524,7 @@ async def test_handle_message_buffer_overflow_flushes():
         buffer_config={"max_buffer_size": 10, "min_buffer_size": 1},
     )
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(
+    sm._processor.process_chunk = AsyncMock(
         return_value={"type": "final", "text": "x" * 6}
     )
 
@@ -611,7 +611,7 @@ async def test_handle_message_llm_sends_final_and_final_llm():
         buffer_config={"max_buffer_size": 10, "min_buffer_size": 1},
     )
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(
+    sm._processor.process_chunk = AsyncMock(
         return_value={"type": "final", "text": "bonjour le monde"}
     )
 
@@ -650,7 +650,7 @@ async def test_handle_message_llm_fallback_sends_only_final():
         buffer_config={"max_buffer_size": 10, "min_buffer_size": 1},
     )
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(
+    sm._processor.process_chunk = AsyncMock(
         return_value={"type": "final", "text": "raw text"}
     )
 
@@ -718,7 +718,7 @@ async def test_handle_message_no_llm_sends_only_final():
     ws = make_mock_ws()
     sm = SessionManager(engine)  # no LLM
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(
+    sm._processor.process_chunk = AsyncMock(
         return_value={"type": "final", "text": "raw text"}
     )
 
@@ -745,7 +745,7 @@ async def test_handle_multiple_audio_chunks():
     ws = make_mock_ws()
     sm = SessionManager(engine)
     sm._processor = make_processor_mock()
-    sm._processor.process_chunk = MagicMock(return_value=None)
+    sm._processor.process_chunk = AsyncMock(return_value=None)
 
     for i in range(5):
         msg = MagicMock()

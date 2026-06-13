@@ -25,7 +25,7 @@ class BaseProcessor(ABC):
         ...
 
     @abstractmethod
-    def process_chunk(self, data: bytes) -> dict | None:
+    async def process_chunk(self, data: bytes) -> dict | None:
         """Process a single audio chunk. Returns a result dict or None.
 
         Result dict format: ``{"type": "final" | "partial", "text": str}``

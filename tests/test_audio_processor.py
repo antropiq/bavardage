@@ -1,5 +1,6 @@
 """Unit tests for AudioProcessor."""
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -95,12 +96,13 @@ def test_init_last_partial_words_empty():
 
 # ── Tests: chunk_count property ──────────────────────────────────────────────
 
-def test_chunk_count_increments():
+@pytest.mark.asyncio
+async def test_chunk_count_increments():
     rec = make_recognizer_mock()
     proc = AudioProcessor(rec)
-    proc.process_chunk(b"audio1")
+    await proc.process_chunk(b"audio1")
     assert proc.chunk_count == 1
-    proc.process_chunk(b"audio2")
+    await proc.process_chunk(b"audio2")
     assert proc.chunk_count == 2
 
 
@@ -146,201 +148,223 @@ def test_needs_reset_after_manual_reset():
 
 # ── Tests: process_chunk - accepted (final) ──────────────────────────────────
 
-def test_process_chunk_accepted_returns_final():
+@pytest.mark.asyncio
+async def test_process_chunk_accepted_returns_final():
     rec = make_recognizer_mock(
         final_result=make_final_json("bonjour le monde"),
         accepted=True,
     )
     proc = AudioProcessor(rec)
-    result = proc.process_chunk(b"audio")
+    result = await proc.process_chunk(b"audio")
     assert result == {"type": "final", "text": "bonjour le monde"}
 
 
-def test_process_chunk_accepted_increments_counter():
+@pytest.mark.asyncio
+async def test_process_chunk_accepted_increments_counter():
     rec = make_recognizer_mock(final_result=make_final_json("test"))
     proc = AudioProcessor(rec)
-    proc.process_chunk(b"audio")
+    await proc.process_chunk(b"audio")
     assert proc.chunk_count == 1
 
 
-def test_process_chunk_accepted_calls_accept_waveform():
+@pytest.mark.asyncio
+async def test_process_chunk_accepted_calls_accept_waveform():
     rec = make_recognizer_mock(final_result=make_final_json("test"))
     proc = AudioProcessor(rec)
-    proc.process_chunk(b"audio data")
+    await proc.process_chunk(b"audio data")
     rec.AcceptWaveform.assert_called_once_with(b"audio data")
 
 
-def test_process_chunk_accepted_calls_final_result():
+@pytest.mark.asyncio
+async def test_process_chunk_accepted_calls_final_result():
     rec = make_recognizer_mock(final_result=make_final_json("test"))
     proc = AudioProcessor(rec)
-    proc.process_chunk(b"audio")
+    await proc.process_chunk(b"audio")
     rec.FinalResult.assert_called_once()
 
 
-def test_process_chunk_accepted_stores_last_final_text():
+@pytest.mark.asyncio
+async def test_process_chunk_accepted_stores_last_final_text():
     rec = make_recognizer_mock(final_result=make_final_json("hello world"))
     proc = AudioProcessor(rec)
-    proc.process_chunk(b"audio")
+    await proc.process_chunk(b"audio")
     assert proc._last_final_text == "hello world"
 
 
-def test_process_chunk_accepted_strips_text():
+@pytest.mark.asyncio
+async def test_process_chunk_accepted_strips_text():
     rec = make_recognizer_mock(final_result=make_final_json("  hello  "))
     proc = AudioProcessor(rec)
-    result = proc.process_chunk(b"audio")
+    result = await proc.process_chunk(b"audio")
     assert result["text"] == "hello"
 
 
 # ── Tests: process_chunk - accepted, empty text ──────────────────────────────
 
-def test_process_chunk_accepted_empty_text_returns_none():
+@pytest.mark.asyncio
+async def test_process_chunk_accepted_empty_text_returns_none():
     rec = make_recognizer_mock(final_result=make_final_json("  "))
     proc = AudioProcessor(rec)
-    result = proc.process_chunk(b"audio")
+    result = await proc.process_chunk(b"audio")
     assert result is None
 
 
-def test_process_chunk_accepted_duplicate_text_returns_none():
+@pytest.mark.asyncio
+async def test_process_chunk_accepted_duplicate_text_returns_none():
     rec = make_recognizer_mock(final_result=make_final_json("same text"))
     proc = AudioProcessor(rec)
-    proc.process_chunk(b"audio1")  # first call sets _last_final_text
+    await proc.process_chunk(b"audio1")  # first call sets _last_final_text
     assert proc._last_final_text == "same text"
-    result = proc.process_chunk(b"audio2")  # duplicate
+    result = await proc.process_chunk(b"audio2")  # duplicate
     assert result is None
 
 
-def test_process_chunk_accepted_new_text_returns_final():
+@pytest.mark.asyncio
+async def test_process_chunk_accepted_new_text_returns_final():
     rec = make_recognizer_mock(final_result=make_final_json(""))
     proc = AudioProcessor(rec)
-    proc.process_chunk(b"audio1")  # empty final result, sets _last_final_text = ""
+    await proc.process_chunk(b"audio1")  # empty final result, sets _last_final_text = ""
     rec.FinalResult.return_value = make_final_json("new text")
-    result = proc.process_chunk(b"audio2")
+    result = await proc.process_chunk(b"audio2")
     assert result == {"type": "final", "text": "new text"}
 
 
 # ── Tests: process_chunk - accepted, bad JSON ────────────────────────────────
 
-def test_process_chunk_accepted_bad_json_returns_none():
+@pytest.mark.asyncio
+async def test_process_chunk_accepted_bad_json_returns_none():
     rec = make_recognizer_mock(final_result="not valid json{{{")
     proc = AudioProcessor(rec)
-    result = proc.process_chunk(b"audio")
+    result = await proc.process_chunk(b"audio")
     assert result is None
 
 
-def test_process_chunk_accepted_missing_text_key_returns_none():
+@pytest.mark.asyncio
+async def test_process_chunk_accepted_missing_text_key_returns_none():
     rec = make_recognizer_mock(final_result=json.dumps({"no_text": "here"}))
     proc = AudioProcessor(rec)
-    result = proc.process_chunk(b"audio")
+    result = await proc.process_chunk(b"audio")
     assert result is None
 
 
 # ── Tests: process_chunk - not accepted (partial) ────────────────────────────
 
-def test_process_chunk_not_accepted_returns_partial():
+@pytest.mark.asyncio
+async def test_process_chunk_not_accepted_returns_partial():
     rec = make_recognizer_mock(
         partial_result=make_partial_json("bonj..."),
         accepted=False,
     )
     proc = AudioProcessor(rec)
-    result = proc.process_chunk(b"audio")
+    result = await proc.process_chunk(b"audio")
     assert result == {"type": "partial", "text": "bonj..."}
 
 
-def test_process_chunk_not_accepted_calls_partial_result():
+@pytest.mark.asyncio
+async def test_process_chunk_not_accepted_calls_partial_result():
     rec = make_recognizer_mock(partial_result=make_partial_json("test"), accepted=False)
     proc = AudioProcessor(rec)
-    proc.process_chunk(b"audio")
+    await proc.process_chunk(b"audio")
     rec.PartialResult.assert_called_once()
 
 
-def test_process_chunk_not_accepted_strips_text():
+@pytest.mark.asyncio
+async def test_process_chunk_not_accepted_strips_text():
     rec = make_recognizer_mock(partial_result=make_partial_json("  hello  "), accepted=False)
     proc = AudioProcessor(rec)
-    result = proc.process_chunk(b"audio")
+    result = await proc.process_chunk(b"audio")
     assert result["text"] == "hello"
 
 
-def test_process_chunk_not_accepted_empty_returns_none():
+@pytest.mark.asyncio
+async def test_process_chunk_not_accepted_empty_returns_none():
     rec = make_recognizer_mock(partial_result=make_partial_json("  "))
     proc = AudioProcessor(rec)
-    result = proc.process_chunk(b"audio")
+    result = await proc.process_chunk(b"audio")
     assert result is None
 
 
-def test_process_chunk_not_accepted_bad_json_returns_none():
+@pytest.mark.asyncio
+async def test_process_chunk_not_accepted_bad_json_returns_none():
     rec = make_recognizer_mock(partial_result="not json")
     proc = AudioProcessor(rec)
-    result = proc.process_chunk(b"audio")
+    result = await proc.process_chunk(b"audio")
     assert result is None
 
 
-def test_process_chunk_not_accepted_missing_partial_key_returns_none():
+@pytest.mark.asyncio
+async def test_process_chunk_not_accepted_missing_partial_key_returns_none():
     rec = make_recognizer_mock(partial_result=json.dumps({"no_partial": "here"}))
     proc = AudioProcessor(rec)
-    result = proc.process_chunk(b"audio")
+    result = await proc.process_chunk(b"audio")
     assert result is None
 
 
 # ── Tests: partial deduplication ─────────────────────────────────────────────
 
-def test_partial_deduplication_same_tail():
+@pytest.mark.asyncio
+async def test_partial_deduplication_same_tail():
     """When last N words match, partial is suppressed."""
     rec = make_recognizer_mock(partial_result=make_partial_json("bonjour comment allez vous"), accepted=False)
     proc = AudioProcessor(rec, partial_word_history=4)
-    proc.process_chunk(b"audio1")  # establishes tail
+    await proc.process_chunk(b"audio1")  # establishes tail
     assert proc._last_partial_words == ["bonjour", "comment", "allez", "vous"]
     # Same tail again → suppressed
     rec.PartialResult = MagicMock(return_value=make_partial_json("bonjour comment allez vous"))
-    result = proc.process_chunk(b"audio2")
+    result = await proc.process_chunk(b"audio2")
     assert result is None
 
 
-def test_partial_deduplication_different_tail():
+@pytest.mark.asyncio
+async def test_partial_deduplication_different_tail():
     """When tail changes, partial is returned."""
     rec = make_recognizer_mock(partial_result=make_partial_json("hello world"), accepted=False)
     proc = AudioProcessor(rec, partial_word_history=2)
-    proc.process_chunk(b"audio1")
+    await proc.process_chunk(b"audio1")
     # Different tail
     rec.PartialResult = MagicMock(return_value=make_partial_json("hello there world"))
-    result = proc.process_chunk(b"audio2")
+    result = await proc.process_chunk(b"audio2")
     assert result == {"type": "partial", "text": "hello there world"}
     assert proc._last_partial_words == ["there", "world"]
 
 
-def test_partial_deduplication_less_than_history():
+@pytest.mark.asyncio
+async def test_partial_deduplication_less_than_history():
     """When fewer words than history, all words are compared."""
     rec = make_recognizer_mock(partial_result=make_partial_json("hi"), accepted=False)
     proc = AudioProcessor(rec, partial_word_history=5)
-    proc.process_chunk(b"audio1")
+    await proc.process_chunk(b"audio1")
     assert proc._last_partial_words == ["hi"]
     # Same tail → suppressed
     rec.PartialResult = MagicMock(return_value=make_partial_json("hi"))
-    result = proc.process_chunk(b"audio2")
+    result = await proc.process_chunk(b"audio2")
     assert result is None
 
 
-def test_partial_deduplication_growing_text():
+@pytest.mark.asyncio
+async def test_partial_deduplication_growing_text():
     """Partial text grows — tail should update."""
     rec = make_recognizer_mock(partial_result=make_partial_json("bon"), accepted=False)
     proc = AudioProcessor(rec, partial_word_history=3)
-    proc.process_chunk(b"audio1")
+    await proc.process_chunk(b"audio1")
     assert proc._last_partial_words == ["bon"]
 
     rec.PartialResult = MagicMock(return_value=make_partial_json("bonjour le"))
-    result = proc.process_chunk(b"audio2")
+    result = await proc.process_chunk(b"audio2")
     assert result == {"type": "partial", "text": "bonjour le"}
     assert proc._last_partial_words == ["bonjour", "le"]
 
 
-def test_partial_deduplication_empty_partial_does_not_affect_tail():
+@pytest.mark.asyncio
+async def test_partial_deduplication_empty_partial_does_not_affect_tail():
     """Empty partial should not update _last_partial_words."""
     rec = make_recognizer_mock(partial_result=make_partial_json("hello"), accepted=False)
     proc = AudioProcessor(rec, partial_word_history=2)
-    proc.process_chunk(b"audio1")
+    await proc.process_chunk(b"audio1")
     assert proc._last_partial_words == ["hello"]
 
     rec.PartialResult = MagicMock(return_value=make_partial_json("  "))
-    result = proc.process_chunk(b"audio2")
+    result = await proc.process_chunk(b"audio2")
     assert result is None
     # Tail should be unchanged
     assert proc._last_partial_words == ["hello"]
@@ -426,20 +450,22 @@ def test_get_stats_empty():
     assert stats == {"chunks": 0, "last_final": ""}
 
 
-def test_get_stats_with_data():
+@pytest.mark.asyncio
+async def test_get_stats_with_data():
     rec = make_recognizer_mock(final_result=make_final_json("hello world"))
     proc = AudioProcessor(rec)
-    proc.process_chunk(b"audio")
+    await proc.process_chunk(b"audio")
     stats = proc.get_stats()
     assert stats["chunks"] == 1
     assert stats["last_final"] == "hello world"
 
 
-def test_get_stats_after_multiple_chunks():
+@pytest.mark.asyncio
+async def test_get_stats_after_multiple_chunks():
     rec = make_recognizer_mock(final_result=make_final_json("test"))
     proc = AudioProcessor(rec)
     for _ in range(5):
-        proc.process_chunk(b"audio")
+        await proc.process_chunk(b"audio")
     stats = proc.get_stats()
     assert stats["chunks"] == 5
 
@@ -458,7 +484,8 @@ def test_reset_recognizer_is_noop():
 
 # ── Tests: mixed final and partial ───────────────────────────────────────────
 
-def test_mixed_final_and_partial():
+@pytest.mark.asyncio
+async def test_mixed_final_and_partial():
     """Process both accepted and non-accepted chunks."""
     rec = make_recognizer_mock()
     proc = AudioProcessor(rec)
@@ -466,19 +493,20 @@ def test_mixed_final_and_partial():
     # First chunk: partial
     rec.AcceptWaveform.return_value = False
     rec.PartialResult.return_value = make_partial_json("bonj...")
-    r1 = proc.process_chunk(b"audio1")
+    r1 = await proc.process_chunk(b"audio1")
     assert r1 == {"type": "partial", "text": "bonj..."}
 
     # Second chunk: accepted (final)
     rec.AcceptWaveform.return_value = True
     rec.FinalResult.return_value = make_final_json("bonjour le monde")
-    r2 = proc.process_chunk(b"audio2")
+    r2 = await proc.process_chunk(b"audio2")
     assert r2 == {"type": "final", "text": "bonjour le monde"}
 
     assert proc.chunk_count == 2
 
 
-def test_final_before_partial():
+@pytest.mark.asyncio
+async def test_final_before_partial():
     """Order: final then partial."""
     rec = make_recognizer_mock()
     proc = AudioProcessor(rec)
@@ -486,18 +514,19 @@ def test_final_before_partial():
     # Final
     rec.AcceptWaveform.return_value = True
     rec.FinalResult.return_value = make_final_json("first")
-    proc.process_chunk(b"a")
+    await proc.process_chunk(b"a")
 
     # Partial
     rec.AcceptWaveform.return_value = False
     rec.PartialResult.return_value = make_partial_json("sec...")
-    r2 = proc.process_chunk(b"b")
+    r2 = await proc.process_chunk(b"b")
     assert r2 == {"type": "partial", "text": "sec..."}
 
 
 # ── Tests: acceptance toggling ───────────────────────────────────────────────
 
-def test_acceptance_toggle_multiple_times():
+@pytest.mark.asyncio
+async def test_acceptance_toggle_multiple_times():
     """Alternate accepted/not accepted."""
     rec = make_recognizer_mock()
     proc = AudioProcessor(rec)
@@ -508,7 +537,7 @@ def test_acceptance_toggle_multiple_times():
             rec.FinalResult.return_value = make_final_json(f"final {i}")
         else:
             rec.PartialResult.return_value = make_partial_json(f"partial {i}")
-        proc.process_chunk(b"audio")
+        await proc.process_chunk(b"audio")
 
     assert proc.chunk_count == 6
 
