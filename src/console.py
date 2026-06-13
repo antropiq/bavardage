@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 
 import numpy as np
@@ -77,8 +78,10 @@ def _open_audio():
     return p, stream
 
 
-def _run_vosk_console(model_path: str | None) -> None:
+async def _run_vosk_console(model_path: str | None) -> None:
     """Run transcription loop using Vosk engine."""
+    import pyaudio
+
     engine = VoskEngine(model_path=model_path)
     engine.load()
 
@@ -95,11 +98,11 @@ def _run_vosk_console(model_path: str | None) -> None:
 
     try:
         while True:
-            data = stream.read(4000, exception_on_overflow=False)
+            data = await asyncio.to_thread(stream.read, 4000, exception_on_overflow=False)
             if len(data) == 0:
                 break
 
-            result = processor.process_chunk(data)
+            result = await processor.process_chunk(data)
             if result is None:
                 continue
 
@@ -121,8 +124,10 @@ def _run_vosk_console(model_path: str | None) -> None:
         p.terminate()
 
 
-def _run_whisper_console(model_path: str, language: str) -> None:
+async def _run_whisper_console(model_path: str, language: str) -> None:
     """Run transcription loop using Whisper engine."""
+    import pyaudio
+
     engine = WhisperEngine(model_path=model_path, language=language)
     engine.load()
 
@@ -137,11 +142,11 @@ def _run_whisper_console(model_path: str, language: str) -> None:
 
     try:
         while True:
-            data = stream.read(4000, exception_on_overflow=False)
+            data = await asyncio.to_thread(stream.read, 4000, exception_on_overflow=False)
             if len(data) == 0:
                 break
 
-            result = processor.process_chunk(data)
+            result = await processor.process_chunk(data)
             if result is None:
                 continue
 
@@ -177,9 +182,9 @@ def main(argv: list[str] | None = None) -> None:
     logger.add(sys.stderr, level=log_level, format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
 
     if args.engine == "vosk":
-        _run_vosk_console(args.vosk_model)
+        asyncio.run(_run_vosk_console(args.vosk_model))
     else:
-        _run_whisper_console(args.whisper_model, args.whisper_language)
+        asyncio.run(_run_whisper_console(args.whisper_model, args.whisper_language))
 
 
 if __name__ == "__main__":

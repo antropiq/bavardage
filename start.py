@@ -95,7 +95,13 @@ def main() -> None:
     )
 
     # Cleanup handler
+    _cleaned_up = False
+
     def cleanup():
+        nonlocal _cleaned_up
+        if _cleaned_up:
+            return
+        _cleaned_up = True
         print("\nShutting down...", file=sys.stderr)
         if server_proc.poll() is None:
             try:
@@ -110,11 +116,16 @@ def main() -> None:
 
     # Handle Ctrl+C
     def signal_handler(sig, frame):
-        cleanup()
-        sys.exit(0)
+        print("\nShutting down...", file=sys.stderr)
+        _cleaned_up = True
+        if server_proc.poll() is None:
+            server_proc.terminate()
+        # Kill parent immediately — subprocess will be reaped
+        os._exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    if sys.platform != "win32":
+        signal.signal(signal.SIGTERM, signal_handler)
 
     # Wait for server to be ready
     ready = wait_for_server()
@@ -132,7 +143,7 @@ def main() -> None:
     try:
         server_proc.communicate()
     except KeyboardInterrupt:
-        cleanup()
+        pass
 
 
 if __name__ == "__main__":

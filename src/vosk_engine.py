@@ -74,9 +74,9 @@ class VoskEngine(BaseEngine):
     Implements the BaseEngine interface.
     """
 
-    def __init__(self, model_path: Path | None = None, pool_size: int = POOL_SIZE) -> None:
+    def __init__(self, model_path: Path | str | None = None, pool_size: int = POOL_SIZE) -> None:
         self._model: Model | None = None
-        self._model_path = model_path or Path("vosk-model-small-fr-0.22")
+        self._model_path = Path(model_path) if model_path else Path("vosk-model-small-fr-0.22")
         self._loaded = False
         self._pool: RecognizerPool | None = None
 

@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import datetime
 import ipaddress
+import os
+import signal
 import ssl
+import sys
 from pathlib import Path
 
 from loguru import logger
@@ -112,6 +115,7 @@ class ServerApp:
         self._runner: web.AppRunner | None = None
         self._ssl_context = ssl_context
         self._sessions: dict[str, dict] = {}
+        self._shutting_down = False
 
     @property
     def engine(self) -> BaseEngine:
@@ -265,15 +269,13 @@ class ServerApp:
         log.info("Server running on {}://0.0.0.0:{}", scheme, PORT)
         log.info("Server will run until stopped with Ctrl+C")
 
-        try:
-            await site.start()
-            await asyncio.Event().wait()  # Wait forever until KeyboardInterrupt
-        except KeyboardInterrupt:
-            pass
+        await site.start()
+        await asyncio.Event().wait()
 
     async def stop(self) -> None:
         """Gracefully shut down the server."""
         log.info("Shutting down server…")
+        self._shutting_down = True
 
         # Cleanup aiohttp
         if self._runner:
@@ -375,14 +377,16 @@ class ServerApp:
         """Synchronous entry point: start, run, stop."""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+
+        def _signal_handler(sig, frame) -> None:
+            loop.call_soon_threadsafe(loop.stop)
+
+        signal.signal(signal.SIGINT, _signal_handler)
+
         try:
             loop.run_until_complete(self.start())
-        except KeyboardInterrupt:
-            # During KeyboardInterrupt the loop is still running, so we
-            # cancel tasks directly instead of re-entering run_until_complete.
-            pending = asyncio.all_tasks(loop)
-            for t in pending:
-                t.cancel()
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            pass
         finally:
             # Force cleanup: close runner's TCP site if still open
             if self._runner:
@@ -396,3 +400,4 @@ class ServerApp:
                 engine._model = None
             engine._loaded = False
             loop.close()
+            os._exit(0)
