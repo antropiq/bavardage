@@ -144,11 +144,14 @@ class SessionManager:
         elif msg.type == web.WSMsgType.BINARY:
             data = bytes(msg.data)
         elif msg.type == web.WSMsgType.CLOSED:
+            log.debug("a CLOSE message type was received.")
             return
         else:
+            log.debug(f"Unprocessable message type received {msg.type}.")
             return
 
         if not data or len(data) == 0:
+            log.debug("There is no data to process, returning")
             return
 
         # Check if a reset is needed

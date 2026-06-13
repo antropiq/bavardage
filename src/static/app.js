@@ -1,5 +1,4 @@
 const toggleBtn = document.getElementById("toggleBtn");
-const outputEl = document.getElementById("output");
 const conversationEl = document.getElementById("conversation");
 const askQuestionBtn = document.getElementById("askQuestionBtn");
 
@@ -13,19 +12,10 @@ let callbackCount = 0;
 let modelReady = false;
 let pingInterval = null;
 let llmEnabled = false;
-let _pendingFinal = null;
-let _pendingCursor = null;
-let _finalTimeout = null;
-let cursorPos = 0;
 let vadSpeaking = false;
 
 const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 const HEALTH_URL = `/health`;
-
-function replaceFromCursor(text) {
-    outputEl.textContent = outputEl.textContent.slice(0, cursorPos) + text;
-    outputEl.scrollTop = outputEl.scrollHeight;
-}
 
 async function waitForModel() {
     toggleBtn.disabled = true;
@@ -44,6 +34,7 @@ async function waitForModel() {
 
                 // Check LLM availability
                 llmEnabled = data.llm_enabled || false;
+                OutputHandler.setLlmEnabled(llmEnabled);
                 askQuestionBtn.disabled = !llmEnabled;
                 if (llmEnabled) {
                     console.log("[app] LLM post-processing enabled");
@@ -75,65 +66,7 @@ async function startRecording() {
         };
 
         ws.onmessage = (event) => {
-            if (event.data === "pong") {
-                return;
-            }
-            const data = JSON.parse(event.data);
-            if (data.type === "ready") {
-                console.log("[app] Server ready, starting audio");
-                return;
-            }
-            if (data.type === "final") {
-                // Replace active text at cursor, then commit (advance cursor + add trailing space)
-                const startCursor = cursorPos;
-                replaceFromCursor(data.text.replace(/\r?\n/g, " ").trim());
-                // Add trailing space for next fragment
-                outputEl.textContent += " ";
-                cursorPos = outputEl.textContent.length;
-                if (llmEnabled) {
-                    _pendingFinal = data.text;
-                    _pendingCursor = startCursor;
-                    if (_finalTimeout) {
-                        clearTimeout(_finalTimeout);
-                    }
-                    _finalTimeout = setTimeout(() => {
-                        if (_pendingFinal !== null) {
-                            // LLM never responded — remove space+raw, keep text before
-                            outputEl.textContent = outputEl.textContent.slice(0, startCursor);
-                            cursorPos = startCursor;
-                            _pendingFinal = null;
-                            _pendingCursor = null;
-                        }
-                    }, 3000);
-                }
-            }
-            if (data.type === "final_llm") {
-                // LLM corrected the last final — replace from saved Vosk cursor, then add trailing space
-                if (_pendingCursor !== null) {
-                    clearTimeout(_finalTimeout);
-                    _finalTimeout = null;
-                    cursorPos = _pendingCursor;
-                    replaceFromCursor(data.text.replace(/\r?\n/g, " ").trim());
-                    outputEl.textContent += " ";
-                    cursorPos = outputEl.textContent.length;
-                    _pendingFinal = null;
-                    _pendingCursor = null;
-                }
-            }
-            if (data.type === "partial") {
-                // Replace active text at cursor position
-                // If cursor is at the end of existing text and no trailing space yet, add one
-                if (outputEl.textContent.length > 0 &&
-                    cursorPos >= outputEl.textContent.length &&
-                    outputEl.textContent.charAt(outputEl.textContent.length - 1) !== " ") {
-                    outputEl.textContent += " ";
-                    cursorPos = outputEl.textContent.length;
-                }
-                replaceFromCursor(data.text.replace(/\r?\n/g, " "));
-            }
-            if (data.type === "pong") {
-                // Server acknowledged our ping
-            }
+            OutputHandler.handleWsMessage(event);
         };
 
         ws.onerror = (err) => {
@@ -153,13 +86,7 @@ async function startRecording() {
 function stopRecording() {
     isRecording = false;
 
-    _pendingFinal = null;
-    _pendingCursor = null;
-    cursorPos = 0;
-    if (_finalTimeout) {
-        clearTimeout(_finalTimeout);
-        _finalTimeout = null;
-    }
+    OutputHandler.reset();
 
     if (audioWorkletNode) {
         try { audioWorkletNode.disconnect(); } catch(e) {}
@@ -185,36 +112,7 @@ function stopRecording() {
 
     toggleBtn.textContent = "Démarrer";
     toggleBtn.className = "btn btn-start";
-    outputEl.textContent = "";
     console.log("[app] Stopped. Callbacks:", callbackCount, "Total bytes:", totalBytes);
-}
-
-function clearLastLine() {
-    if (_pendingCursor !== null) {
-        _pendingFinal = null;
-        _pendingCursor = null;
-        if (_finalTimeout) {
-            clearTimeout(_finalTimeout);
-            _finalTimeout = null;
-        }
-        return;
-    }
-    const lines = outputEl.textContent.split("\n");
-    if (lines.length > 0) {
-        lines.pop();
-        outputEl.textContent = lines.join("\n");
-    }
-}
-
-function clearAll() {
-    outputEl.textContent = "";
-    _pendingFinal = null;
-    _pendingCursor = null;
-    cursorPos = 0;
-    if (_finalTimeout) {
-        clearTimeout(_finalTimeout);
-        _finalTimeout = null;
-    }
 }
 
 function appendConversationEntry(question, answer) {
@@ -247,9 +145,8 @@ function appendConversationLoading(question) {
     return loadingDiv;
 }
 
-async function askQuestion() {
-    const text = outputEl.textContent.trim();
-    if (!text) {
+async function askQuestion(content) {
+    if (!content) {
         console.warn("[app] No text to ask about");
         return;
     }
@@ -259,14 +156,14 @@ async function askQuestion() {
     }
 
     askQuestionBtn.disabled = true;
-    const loadingEl = appendConversationLoading(text);
-    console.log("[app] Sending to LLM:", text.substring(0, 200));
+    const loadingEl = appendConversationLoading(content);
+    console.log("[app] Sending to LLM:", content.substring(0, 200));
 
     try {
         const res = await fetch("/api/llm-chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text }),
+            body: JSON.stringify({ text: content }),
         });
         console.log("[app] LLM response status:", res.status);
 
@@ -274,11 +171,11 @@ async function askQuestion() {
 
         if (!res.ok || data.error) {
             console.error("[app] LLM chat error:", data.error);
-            appendConversationLoading(text + "\n[Erreur: " + data.error + "]");
+            appendConversationLoading(content + "\n[Erreur: " + data.error + "]");
             return;
         }
 
-        appendConversationEntry(text, data.answer);
+        appendConversationEntry(content, data.answer);
     } catch (err) {
         console.error("[app] LLM chat request failed:", err);
     } finally {
@@ -397,9 +294,9 @@ toggleBtn.addEventListener("click", () => {
     }
 });
 
-document.getElementById("clearLastLineBtn").addEventListener("click", clearLastLine);
-document.getElementById("clearAllBtn").addEventListener("click", clearAll);
-askQuestionBtn.addEventListener("click", askQuestion);
+document.getElementById("clearLastLineBtn").addEventListener("click", OutputHandler.clearLastLine);
+document.getElementById("clearAllBtn").addEventListener("click", OutputHandler.clearAll);
+askQuestionBtn.addEventListener("click", () => askQuestion(document.getElementById("output").textContent.trim()));
 
 // Start polling on page load
 waitForModel();
