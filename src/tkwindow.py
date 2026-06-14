@@ -245,7 +245,7 @@ class TkWindow:
     # --- GUI construction ---
 
     def _build_gui(self) -> ttk.Window:
-        root = ttk.Window(themename="cosmo")
+        root = ttk.Window(themename="darkly")
         root.title("Bavardage")
         root.attributes("-topmost", True)
         root.minsize(340, 240)
@@ -267,14 +267,6 @@ class TkWindow:
         top_frame = tk.Frame(root, bg="#000000")
         top_frame.pack(fill=X, padx=15, pady=(15, 10))
 
-        self.status_var = tk.StringVar(value="Ready")
-        self.status_label = ttk.Label(
-            top_frame,
-            textvariable=self.status_var,
-            font=("Inter", 10),
-        )
-        self.status_label.pack(side=LEFT)
-
         # Speaker/Mic status buttons (visual indicators)
         self._device_btn_frame = tk.Frame(top_frame, bg="#000000")
         self._device_btn_frame.pack(side=LEFT, padx=(12, 6))
@@ -282,7 +274,7 @@ class TkWindow:
         self.speaker_btn = ttk.Button(
             self._device_btn_frame,
             text="\U0001F50A",
-            command=self._configure_speaker,
+            command=self._toggle_speaker,
             bootstyle=(OUTLINE, PRIMARY),
             width=3,
             state=DISABLED,
@@ -292,7 +284,7 @@ class TkWindow:
         self.mic_btn = ttk.Button(
             self._device_btn_frame,
             text="\U0001F3A4",
-            command=self._configure_mic,
+            command=self._toggle_mic,
             bootstyle=(OUTLINE, PRIMARY),
             width=3,
             state=DISABLED,
@@ -320,6 +312,14 @@ class TkWindow:
             state=DISABLED,
         )
         self.clear_btn.pack(side=LEFT, padx=(0, 6))
+
+        self.status_var = tk.StringVar(value="Ready")
+        self.status_label = ttk.Label(
+            top_frame,
+            textvariable=self.status_var,
+            font=("Inter", 10),
+        )
+        self.status_label.pack(side=LEFT, fill=X, expand=True, padx=(12, 0))
 
         # Separator
         tk.Frame(root, height=2, bg="#333333").pack(fill=X, padx=15, pady=(0, 10))
@@ -399,106 +399,37 @@ class TkWindow:
             # Determine active device from settings
             if self._speaker_index is not None and 0 <= self._speaker_index < len(self._sources):
                 self._active_index = self._speaker_index
-                self.speaker_btn.config(state=NORMAL, bootstyle=(SUCCESS, PRIMARY))
-                self.mic_btn.config(state=DISABLED)
+                self.speaker_btn.config(state=NORMAL, bootstyle=PRIMARY)
+                self.mic_btn.config(state=NORMAL if self._mic_index is not None else DISABLED, bootstyle=(OUTLINE, PRIMARY))
             elif self._mic_index is not None and 0 <= self._mic_index < len(self._sources):
                 self._active_index = self._mic_index
-                self.mic_btn.config(state=NORMAL, bootstyle=(SUCCESS, PRIMARY))
-                self.speaker_btn.config(state=DISABLED)
+                self.mic_btn.config(state=NORMAL, bootstyle=PRIMARY)
+                self.speaker_btn.config(state=NORMAL if self._speaker_index is not None else DISABLED, bootstyle=(OUTLINE, PRIMARY))
             else:
-                self.status_var.set("No device configured — click 🔊 or 🎤 to select")
+                self.status_var.set("No device configured — use --list-devices to find device IDs")
                 self.toggle_btn.config(state=DISABLED)
-                self.speaker_btn.config(state=NORMAL)
-                self.mic_btn.config(state=NORMAL)
+                self.speaker_btn.config(state=DISABLED)
+                self.mic_btn.config(state=DISABLED)
 
             self.clear_btn.config(state=NORMAL)
 
         return root
 
-    def _configure_speaker(self) -> None:
-        """Open a simple dialog to select a speaker/monitor device."""
-        if not self._sources:
+    def _toggle_mic(self) -> None:
+        """Switch active device to the configured microphone."""
+        if self._mic_index is None or self._mic_index < 0 or self._mic_index >= len(self._sources):
             return
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Select Speaker Device")
-        dialog.geometry("400x300")
-        dialog.configure(bg="#000000")
-        dialog.transient(self.root)
-        dialog.grab_set()
+        self._active_index = self._mic_index
+        self.mic_btn.config(state=NORMAL, bootstyle=PRIMARY)
+        self.speaker_btn.config(state=NORMAL if self._speaker_index is not None else DISABLED, bootstyle=(OUTLINE, PRIMARY))
 
-        tk.Label(dialog, text="Choose a speaker/monitor source:", bg="#000000", fg="#ffffff", font=("Inter", 11)).pack(pady=10)
-
-        var = tk.StringVar()
-        lb = tk.Listbox(dialog, bg="#1a1a1a", fg="#ffffff", selectmode=SINGLE, font=("Inter", 9), height=10)
-        for i, (name, desc, stype) in enumerate(self._sources):
-            label = f"[{stype.upper()}] {name}" + (f" — {desc}" if desc else "")
-            lb.insert(tk.END, label)
-            if i == self._speaker_index:
-                var.set(i)
-        lb.pack(fill=BOTH, expand=True, padx=10, pady=5)
-
-        def on_select():
-            idx = lb.curselection()
-            if idx:
-                self._speaker_index = idx[0]
-                self._active_index = self._speaker_index
-                self._save_devices()
-                dialog.destroy()
-                self._update_device_buttons()
-
-        tk.Button(dialog, text="Select", command=on_select, bg="#007acc", fg="#ffffff", font=("Inter", 9)).pack(pady=5)
-
-    def _configure_mic(self) -> None:
-        """Open a simple dialog to select a microphone device."""
-        if not self._sources:
+    def _toggle_speaker(self) -> None:
+        """Switch active device to the configured speaker monitor."""
+        if self._speaker_index is None or self._speaker_index < 0 or self._speaker_index >= len(self._sources):
             return
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Select Microphone Device")
-        dialog.geometry("400x300")
-        dialog.configure(bg="#000000")
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        tk.Label(dialog, text="Choose a microphone source:", bg="#000000", fg="#ffffff", font=("Inter", 11)).pack(pady=10)
-
-        var = tk.StringVar()
-        lb = tk.Listbox(dialog, bg="#1a1a1a", fg="#ffffff", selectmode=SINGLE, font=("Inter", 9), height=10)
-        for i, (name, desc, stype) in enumerate(self._sources):
-            label = f"[{stype.upper()}] {name}" + (f" — {desc}" if desc else "")
-            lb.insert(tk.END, label)
-            if i == self._mic_index:
-                var.set(i)
-        lb.pack(fill=BOTH, expand=True, padx=10, pady=5)
-
-        def on_select():
-            idx = lb.curselection()
-            if idx:
-                self._mic_index = idx[0]
-                self._active_index = self._mic_index
-                self._save_devices()
-                dialog.destroy()
-                self._update_device_buttons()
-
-        tk.Button(dialog, text="Select", command=on_select, bg="#007acc", fg="#ffffff", font=("Inter", 9)).pack(pady=5)
-
-    def _save_devices(self) -> None:
-        """Save device indices to settings file."""
-        settings = _load_settings()
-        settings["micDeviceIndex"] = self._mic_index if self._mic_index is not None else -1
-        settings["speakerMonitorDeviceIndex"] = self._speaker_index if self._speaker_index is not None else -1
-        _save_settings(settings)
-
-    def _update_device_buttons(self) -> None:
-        """Update speaker/mic button states based on configured indices."""
-        if self._speaker_index is not None and self._speaker_index == self._active_index:
-            self.speaker_btn.config(state=NORMAL, bootstyle=(SUCCESS, PRIMARY))
-        else:
-            self.speaker_btn.config(state=NORMAL if self._speaker_index is not None else DISABLED, bootstyle=(OUTLINE, PRIMARY))
-
-        if self._mic_index is not None and self._mic_index == self._active_index:
-            self.mic_btn.config(state=NORMAL, bootstyle=(SUCCESS, PRIMARY))
-        else:
-            self.mic_btn.config(state=NORMAL if self._mic_index is not None else DISABLED, bootstyle=(OUTLINE, PRIMARY))
+        self._active_index = self._speaker_index
+        self.speaker_btn.config(state=NORMAL, bootstyle=PRIMARY)
+        self.mic_btn.config(state=NORMAL if self._mic_index is not None else DISABLED, bootstyle=(OUTLINE, PRIMARY))
 
     def _on_canvas_configure(self, event: tk.Event) -> None:
         """Sync wrap width on any canvas resize."""
