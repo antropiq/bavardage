@@ -162,6 +162,9 @@ class TkWindow:
         # Ping-pong: active canvas shows partials, committed shows final
         self.active_is_top = True
 
+        # DPI scale factor for correct window position restoration on scaled displays
+        self._dpi_scale: float = 1.0
+
         self.canvas_top: tk.Canvas | None = None
         self.canvas_bottom: tk.Canvas | None = None
         self.items_top: list[int | None] = []
@@ -177,6 +180,25 @@ class TkWindow:
         settings = _load_settings()
         self._mic_index = settings.get("micDeviceIndex")
         self._speaker_index = settings.get("speakerMonitorDeviceIndex")
+
+    def _calc_dpi_scale(self) -> float:
+        """Calculate the display DPI scale factor.
+
+        Compares physical pixel size vs logical size to detect fractional
+        scaling (e.g. 1.25x font scaling on GNOME). Returns 1.0 if
+        indistinguishable from 1:1.
+        """
+        try:
+            # winfo_fpixels(1) returns the size of 1 pixel in physical pixels
+            physical = self.root.winfo_fpixels(1)
+            logical = self.root.winfo_pixels(1)
+            if logical > 0:
+                scale = physical / logical
+                # Clamp to reasonable range to avoid noise
+                return max(1.0, min(scale, 3.0))
+        except Exception:
+            pass
+        return 1.0
 
     def _save_window_geometry(self) -> None:
         """Save current window geometry to settings file."""
@@ -202,13 +224,20 @@ class TkWindow:
         _save_settings(settings)
 
     def _restore_window_geometry(self) -> None:
-        """Restore window geometry from settings if available."""
+        """Restore window geometry from settings if available.
+
+        Position coordinates are scaled by the DPI factor so that on
+        fractional-DPI displays the window appears at the same physical
+        screen location the user originally placed it.
+        """
         settings = _load_settings()
         wp = settings.get("windowsPosition")
         if wp and all(k in wp for k in ("width", "height", "left", "top")):
             try:
+                left = int(wp["left"] * self._dpi_scale)
+                top = int(wp["top"] * self._dpi_scale)
                 self.root.geometry(
-                    f"{wp['width']}x{wp['height']}+{wp['left']}+{wp['top']}"
+                    f"{wp['width']}x{wp['height']}+{left}+{top}"
                 )
             except (ValueError, TypeError):
                 pass
@@ -659,6 +688,7 @@ class TkWindow:
 
     def run(self) -> None:
         self.root = self._build_gui()
+        self._dpi_scale = self._calc_dpi_scale()
         self._restore_window_geometry()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         if self._autostart:
