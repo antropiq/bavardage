@@ -1,11 +1,13 @@
 """Tkinter window mode: real-time French speech transcription (Vosk only).
 
-GUI equivalent of console.py: dropdown for source selection, Start/Stop button,
-live subtitle display with committed (bold yellow) and partial (italic gray) text.
+GUI equivalent of console.py: Start/Stop button, live subtitle display with
+committed (bold yellow) and partial (italic gray) text.
 Uses parec for PipeWire/PulseAudio monitor source capture.
 
 Rendering: canvas text items updated in-place via canvas.after() — no widget
 destruction/recreation, hence no flicker.
+
+Settings are persisted in ~/.bavardage/settings.json (cross-platform).
 """
 
 from __future__ import annotations
@@ -17,11 +19,15 @@ import subprocess
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
+from pathlib import Path
 
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from loguru import logger
 from vosk import KaldiRecognizer, Model
+
+_SETTINGS_DIR = Path.home() / ".bavardage"
+_SETTINGS_FILE = _SETTINGS_DIR / "settings.json"
 
 
 def _list_monitor_sources() -> list[tuple[str, str]]:
@@ -92,6 +98,32 @@ def _amplify(data: bytes, volume: float) -> bytes:
     return samples.tobytes()
 
 
+def _load_settings() -> dict:
+    """Load settings from ~/.bavardage/settings.json."""
+    try:
+        if _SETTINGS_FILE.exists():
+            with open(_SETTINGS_FILE, "r") as f:
+                return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Failed to load settings: {e}")
+    # Return defaults so the file is self-documenting
+    return {
+        "micDeviceIndex": -1,
+        "speakerMonitorDeviceIndex": -1,
+        "autostart": False,
+    }
+
+
+def _save_settings(settings: dict) -> None:
+    """Save settings to ~/.bavardage/settings.json."""
+    try:
+        _SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+        with open(_SETTINGS_FILE, "w") as f:
+            json.dump(settings, f, indent=2)
+    except OSError as e:
+        logger.warning(f"Failed to save settings: {e}")
+
+
 class TkWindow:
     """Tkinter window for real-time Vosk transcription using canvas rendering.
 
@@ -119,8 +151,13 @@ class TkWindow:
         self._last_final = ""
         self._last_partial = ""
         self._sources: list[tuple[str, str, str]] = []
-        self._speaker_idx = -1
-        self._mic_idx = -1
+
+        # Device indices from settings (None = not configured)
+        self._mic_index: int | None = None
+        self._speaker_index: int | None = None
+
+        # Currently active device index (-1 = none)
+        self._active_index: int = -1
 
         # Ping-pong: active canvas shows partials, committed shows final
         self.active_is_top = True
@@ -133,55 +170,56 @@ class TkWindow:
         self._max_text_items: int = 100
         self._line_height: int = 0
 
+    # --- Settings ---
+
+    def _load_device_settings(self) -> None:
+        """Load device indices from settings file."""
+        settings = _load_settings()
+        self._mic_index = settings.get("micDeviceIndex")
+        self._speaker_index = settings.get("speakerMonitorDeviceIndex")
+
+    def _save_window_geometry(self) -> None:
+        """Save current window geometry to settings file."""
+        if not self.root:
+            return
+        settings = _load_settings()
+        geometry = self.root.geometry()
+        # Parse geometry: WIDTHxHEIGHT+X+Y
+        try:
+            parts = geometry.split("+")
+            size_parts = parts[0].split("x")
+            width, height = int(size_parts[0]), int(size_parts[1])
+            left = int(parts[1]) if len(parts) > 1 else 0
+            top = int(parts[2]) if len(parts) > 2 else 0
+            settings["windowsPosition"] = {
+                "width": width,
+                "height": height,
+                "left": left,
+                "top": top,
+            }
+        except (IndexError, ValueError):
+            pass
+        _save_settings(settings)
+
+    def _restore_window_geometry(self) -> None:
+        """Restore window geometry from settings if available."""
+        settings = _load_settings()
+        wp = settings.get("windowsPosition")
+        if wp and all(k in wp for k in ("width", "height", "left", "top")):
+            try:
+                self.root.geometry(
+                    f"{wp['width']}x{wp['height']}+{wp['left']}+{wp['top']}"
+                )
+            except (ValueError, TypeError):
+                pass
+
     # --- GUI construction ---
-
-    def _find_speaker_device(self) -> int:
-        """Return index of first device containing both 'speaker' and 'monitor' (case-insensitive)."""
-        for i, (name, desc, _) in enumerate(self._sources):
-            combined = f"{name} {desc}".lower()
-            if "speaker" in combined and "monitor" in combined:
-                return i
-        return -1
-
-    def _find_mic_device(self) -> int:
-        """Return index of first device containing both 'mic' and 'source' (case-insensitive)."""
-        for i, (name, desc, _) in enumerate(self._sources):
-            combined = f"{name} {desc}".lower()
-            if "mic" in combined and "source" in combined:
-                return i
-        return -1
-
-    def _select_speaker(self) -> None:
-        idx = self._find_speaker_device()
-        if idx >= 0:
-            self.source_combo.current(idx)
-            self._update_device_buttons()
-
-    def _select_mic(self) -> None:
-        idx = self._find_mic_device()
-        if idx >= 0:
-            self.source_combo.current(idx)
-            self._update_device_buttons()
-
-    def _on_source_selected(self, event: tk.Event | None = None) -> None:
-        self._update_device_buttons()
-
-    def _update_device_buttons(self) -> None:
-        selected = self.source_combo.current()
-        if self._speaker_idx >= 0:
-            self.speaker_btn.config(
-                bootstyle=(SUCCESS if selected == self._speaker_idx else OUTLINE, PRIMARY),
-            )
-        if self._mic_idx >= 0:
-            self.mic_btn.config(
-                bootstyle=(SUCCESS if selected == self._mic_idx else OUTLINE, PRIMARY),
-            )
 
     def _build_gui(self) -> ttk.Window:
         root = ttk.Window(themename="cosmo")
         root.title("Bavardage")
         root.attributes("-topmost", True)
-        root.minsize(480, 480)
+        root.minsize(340, 240)
         root.configure(bg="#000000")
 
         # Set window icon
@@ -196,40 +234,26 @@ class TkWindow:
         except Exception:
             pass
 
-        # Full-width, bottom-aligned window
-        root.update_idletasks()
-        sw = root.winfo_screenwidth()
-        sh = root.winfo_screenheight()
-        wh = 480
-        root.geometry(f"{sw}x{wh}+0+{sh - wh}")
-
-        # Top frame: source selector + buttons
+        # Top frame: status + buttons
         top_frame = tk.Frame(root, bg="#000000")
         top_frame.pack(fill=X, padx=15, pady=(15, 10))
 
-        source_label = ttk.Label(top_frame, text="Source:", font=("Inter", 11, "bold"))
-        source_label.pack(side=LEFT)
-
-        self.source_var = tk.StringVar()
-        self.source_combo = ttk.Combobox(
+        self.status_var = tk.StringVar(value="Ready")
+        self.status_label = ttk.Label(
             top_frame,
-            textvariable=self.source_var,
-            state="readonly",
-            width=42,
+            textvariable=self.status_var,
             font=("Inter", 10),
         )
-        self.source_combo.pack(side=LEFT, fill=X, expand=True, padx=(0, 6))
+        self.status_label.pack(side=LEFT)
 
-        self.source_combo.bind("<<ComboboxSelected>>", self._on_source_selected)
-
-        # Quick-select device buttons (speaker / mic)
+        # Speaker/Mic status buttons (visual indicators)
         self._device_btn_frame = tk.Frame(top_frame, bg="#000000")
-        self._device_btn_frame.pack(side=LEFT, padx=(0, 6))
+        self._device_btn_frame.pack(side=LEFT, padx=(12, 6))
 
         self.speaker_btn = ttk.Button(
             self._device_btn_frame,
             text="\U0001F50A",
-            command=self._select_speaker,
+            command=self._configure_speaker,
             bootstyle=(OUTLINE, PRIMARY),
             width=3,
             state=DISABLED,
@@ -239,14 +263,12 @@ class TkWindow:
         self.mic_btn = ttk.Button(
             self._device_btn_frame,
             text="\U0001F3A4",
-            command=self._select_mic,
+            command=self._configure_mic,
             bootstyle=(OUTLINE, PRIMARY),
             width=3,
             state=DISABLED,
         )
         self.mic_btn.pack(side=LEFT, padx=(0, 0))
-
-        self._update_device_buttons()
 
         btn_frame = tk.Frame(top_frame, bg="#000000")
         btn_frame.pack(side=LEFT, padx=(0, 12))
@@ -270,18 +292,10 @@ class TkWindow:
         )
         self.clear_btn.pack(side=LEFT, padx=(0, 6))
 
-        self.status_var = tk.StringVar(value="Ready")
-        self.status_label = ttk.Label(
-            top_frame,
-            textvariable=self.status_var,
-            font=("Inter", 10),
-        )
-        self.status_label.pack(side=LEFT)
-
         # Separator
         tk.Frame(root, height=2, bg="#333333").pack(fill=X, padx=15, pady=(0, 10))
 
-         # Canvas for rendering text - vertically stacked, fills all available space
+        # Canvas for rendering text - vertically stacked, fills all available space
         canvas_frame = tk.Frame(root, bg="#000000")
         canvas_frame.pack(fill=BOTH, expand=True, padx=15, pady=10)
         canvas_frame.rowconfigure(0, weight=1)
@@ -344,32 +358,118 @@ class TkWindow:
             )
             self.items_bottom.append(item_b)
 
-        # Populate source dropdown
+        # Load device settings and populate source list
+        self._load_device_settings()
+        self._autostart = _load_settings().get("autostart", False)
         self._sources = _list_all_sources()
-        if self._sources:
-            display = [f"[{t.upper()}] {name}" + (f" — {desc}" if desc else "") for name, desc, t in self._sources]
-            self.source_combo["values"] = display
-            self.source_combo.current(0)
+
+        if not self._sources:
+            self.status_var.set("No audio sources")
+            self.toggle_btn.config(state=DISABLED)
+        else:
+            # Determine active device from settings
+            if self._speaker_index is not None and 0 <= self._speaker_index < len(self._sources):
+                self._active_index = self._speaker_index
+                self.speaker_btn.config(state=NORMAL, bootstyle=(SUCCESS, PRIMARY))
+                self.mic_btn.config(state=DISABLED)
+            elif self._mic_index is not None and 0 <= self._mic_index < len(self._sources):
+                self._active_index = self._mic_index
+                self.mic_btn.config(state=NORMAL, bootstyle=(SUCCESS, PRIMARY))
+                self.speaker_btn.config(state=DISABLED)
+            else:
+                self.status_var.set("No device configured — click 🔊 or 🎤 to select")
+                self.toggle_btn.config(state=DISABLED)
+                self.speaker_btn.config(state=NORMAL)
+                self.mic_btn.config(state=NORMAL)
+
             self.clear_btn.config(state=NORMAL)
 
-            # Evaluate quick-select buttons
-            self._speaker_idx = self._find_speaker_device()
-            self._mic_idx = self._find_mic_device()
-            if self._speaker_idx >= 0:
-                self.speaker_btn.config(state=NORMAL)
-            if self._mic_idx >= 0:
-                self.mic_btn.config(state=NORMAL)
-            self._update_device_buttons()
-
-            # Hide dropdown when both speaker and mic devices are available
-            if self._speaker_idx >= 0 and self._mic_idx >= 0:
-                source_label.pack_forget()
-                self.source_combo.pack_forget()
-        else:
-            self.source_combo["values"] = ("No sources found",)
-            self.status_var.set("No audio sources")
-
         return root
+
+    def _configure_speaker(self) -> None:
+        """Open a simple dialog to select a speaker/monitor device."""
+        if not self._sources:
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Select Speaker Device")
+        dialog.geometry("400x300")
+        dialog.configure(bg="#000000")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="Choose a speaker/monitor source:", bg="#000000", fg="#ffffff", font=("Inter", 11)).pack(pady=10)
+
+        var = tk.StringVar()
+        lb = tk.Listbox(dialog, bg="#1a1a1a", fg="#ffffff", selectmode=SINGLE, font=("Inter", 9), height=10)
+        for i, (name, desc, stype) in enumerate(self._sources):
+            label = f"[{stype.upper()}] {name}" + (f" — {desc}" if desc else "")
+            lb.insert(tk.END, label)
+            if i == self._speaker_index:
+                var.set(i)
+        lb.pack(fill=BOTH, expand=True, padx=10, pady=5)
+
+        def on_select():
+            idx = lb.curselection()
+            if idx:
+                self._speaker_index = idx[0]
+                self._active_index = self._speaker_index
+                self._save_devices()
+                dialog.destroy()
+                self._update_device_buttons()
+
+        tk.Button(dialog, text="Select", command=on_select, bg="#007acc", fg="#ffffff", font=("Inter", 9)).pack(pady=5)
+
+    def _configure_mic(self) -> None:
+        """Open a simple dialog to select a microphone device."""
+        if not self._sources:
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Select Microphone Device")
+        dialog.geometry("400x300")
+        dialog.configure(bg="#000000")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="Choose a microphone source:", bg="#000000", fg="#ffffff", font=("Inter", 11)).pack(pady=10)
+
+        var = tk.StringVar()
+        lb = tk.Listbox(dialog, bg="#1a1a1a", fg="#ffffff", selectmode=SINGLE, font=("Inter", 9), height=10)
+        for i, (name, desc, stype) in enumerate(self._sources):
+            label = f"[{stype.upper()}] {name}" + (f" — {desc}" if desc else "")
+            lb.insert(tk.END, label)
+            if i == self._mic_index:
+                var.set(i)
+        lb.pack(fill=BOTH, expand=True, padx=10, pady=5)
+
+        def on_select():
+            idx = lb.curselection()
+            if idx:
+                self._mic_index = idx[0]
+                self._active_index = self._mic_index
+                self._save_devices()
+                dialog.destroy()
+                self._update_device_buttons()
+
+        tk.Button(dialog, text="Select", command=on_select, bg="#007acc", fg="#ffffff", font=("Inter", 9)).pack(pady=5)
+
+    def _save_devices(self) -> None:
+        """Save device indices to settings file."""
+        settings = _load_settings()
+        settings["micDeviceIndex"] = self._mic_index if self._mic_index is not None else -1
+        settings["speakerMonitorDeviceIndex"] = self._speaker_index if self._speaker_index is not None else -1
+        _save_settings(settings)
+
+    def _update_device_buttons(self) -> None:
+        """Update speaker/mic button states based on configured indices."""
+        if self._speaker_index is not None and self._speaker_index == self._active_index:
+            self.speaker_btn.config(state=NORMAL, bootstyle=(SUCCESS, PRIMARY))
+        else:
+            self.speaker_btn.config(state=NORMAL if self._speaker_index is not None else DISABLED, bootstyle=(OUTLINE, PRIMARY))
+
+        if self._mic_index is not None and self._mic_index == self._active_index:
+            self.mic_btn.config(state=NORMAL, bootstyle=(SUCCESS, PRIMARY))
+        else:
+            self.mic_btn.config(state=NORMAL if self._mic_index is not None else DISABLED, bootstyle=(OUTLINE, PRIMARY))
 
     def _on_canvas_configure(self, event: tk.Event) -> None:
         """Sync wrap width on any canvas resize."""
@@ -456,16 +556,11 @@ class TkWindow:
             self._start()
 
     def _start(self) -> None:
-        source_idx = self.source_combo.current()
-        if source_idx < 0:
-            self.status_var.set("No source selected")
+        if self._active_index < 0 or self._active_index >= len(self._sources):
+            self.status_var.set("No device configured")
             return
 
-        if source_idx >= len(self._sources):
-            self.status_var.set("Invalid source")
-            return
-
-        source_name, _, source_type = self._sources[source_idx]
+        source_name, _, source_type = self._sources[self._active_index]
         self.status_var.set(f"Starting ({source_type})...")
         self.root.update_idletasks()
 
@@ -491,7 +586,6 @@ class TkWindow:
         self._partial_text = ""
         self._clear()
         self.toggle_btn.config(text="Stop", bootstyle=(DANGER, OUTLINE))
-        self.source_combo.config(state="disabled")
         self.clear_btn.config(state=DISABLED)
         self.status_var.set("Listening")
 
@@ -509,7 +603,6 @@ class TkWindow:
         self.proc = None
         self.rec = None
         self.toggle_btn.config(text="Start", bootstyle=(SUCCESS, OUTLINE))
-        self.source_combo.config(state="readonly" if self.source_combo.winfo_viewable() else "disabled")
         self.clear_btn.config(state=NORMAL)
         self.status_var.set("Stopped")
 
@@ -566,12 +659,16 @@ class TkWindow:
 
     def run(self) -> None:
         self.root = self._build_gui()
+        self._restore_window_geometry()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        if self._autostart:
+            self.root.after(300, self._toggle)
         self.root.mainloop()
 
     def _on_close(self) -> None:
         if self.running:
             self._stop()
+        self._save_window_geometry()
         self.root.destroy()
 
 
@@ -591,8 +688,8 @@ def main(argv=None) -> None:
         sources = _list_all_sources()
         if sources:
             print("=== Available audio sources ===")
-            for name, desc, src_type in sources:
-                print(f"  [{src_type.upper()}] {name} — {desc}")
+            for idx, (name, desc, src_type) in enumerate(sources):
+                print(f"  {idx}: [{src_type.upper()}] {name} — {desc}")
         else:
             print("No audio sources found.")
         return
