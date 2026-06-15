@@ -70,6 +70,21 @@ python start.py --console
 
 Streams transcription directly to the terminal. Press `Ctrl+C` to exit.
 
+**GUI mode (Tkinter window):**
+
+```bash
+# List available audio devices
+python -m src.tkwindow --list-devices
+
+# Run with Vosk (default)
+python -m src.tkwindow
+
+# Run with custom model and speaker capture
+python -m src.tkwindow --vosk-model /path/to/model --user-speaker --volume 3.0 --debug
+```
+
+Opens a floating window with Start/Stop button, device selector, and live transcription display with committed (bold) and partial (italic) text.
+
 ## CLI Options
 
 | Flag | Description | Default |
@@ -91,6 +106,10 @@ Streams transcription directly to the terminal. Press `Ctrl+C` to exit.
 | `--ssl-keyfile` | Path to SSL private key file | *(auto-generated)* |
 | `--debug` | Enable DEBUG-level logging | `false` |
 | `--console` | Run in console mode (terminal transcription, no server) | `false` |
+| `--list-devices` | List available audio devices and exit (tkwindow) | `false` |
+| `--user-speaker` | Capture system speaker output (tkwindow) | `false` |
+| `--volume` | Input volume multiplier (tkwindow) | `1.0` |
+| `--device` | Audio device index (tkwindow) | `None` |
 
 ## How It Works
 
@@ -100,6 +119,7 @@ Microphone → Audio capture (16kHz mono) → Engine (Vosk / Whisper) → Transc
 
 - **Web mode**: Browser captures audio via Web Audio API (AudioWorklet), sends raw PCM to an aiohttp WebSocket server, which runs Vosk or Whisper and streams results back.
 - **Terminal mode**: PyAudio captures audio directly, Vosk/Whisper processes it in-process, results print to stdout.
+- **GUI mode**: Tkinter window with canvas rendering, device selector, and Start/Stop controls. Uses the same transcription engines as terminal mode.
 
 Both modes use the same engine abstractions — fully offline, no API keys, no network calls (unless LLM post-processing is enabled).
 
@@ -216,6 +236,19 @@ Pydantic-based configuration models (`LLMConfig`, `ServerConfig`) with validatio
 - Partial results overwrite the terminal line with `\r` (carriage return)
 - Whisper mode: silence-based triggering with flush on Ctrl+C
 
+### Tkinter GUI (`src/tkwindow/`)
+
+OOP-refactored package providing a floating transcription window with device selector and Start/Stop controls.
+
+- **Package structure**: `cli.py` (argparse, entry point), `window.py` (TkWindow orchestrator), `settings.py` (persistence), `devices/` (platform-specific enumeration), `audio/` (capture abstraction), `renderer/` (canvas rendering), `gui/` (widget construction)
+- **Dual-canvas rendering**: Ping-pong architecture with committed (final) and active (partial) canvases for flicker-free display
+- **Device management**: Linux uses `pactl` for PulseAudio/PipeWire sources; Windows uses PyAudio/PortAudio enumeration
+- **Audio capture**: Linux captures via `parec` subprocess; Windows uses PyAudio stream
+- **CanvasRenderer**: Manages pre-allocated text item pools, font configuration, and render logic
+- **ItemPool**: Pre-allocates canvas text items for smooth in-place updates
+- **Settings**: Persists device indices and window geometry in `~/.bavardage/settings.json`
+- **Cross-platform**: Platform detection centralized in `devices/__init__.py` and `audio/__init__.py`
+
 ### Launcher (`start.py`)
 
 - Cross-platform launcher (Windows/macOS/Linux)
@@ -249,6 +282,30 @@ src/
   whisper_processor.py# Audio chunk processing (Whisper)
   transcription_buffer.py  # Fragment accumulation & silence detection
   llm_post_processor.py    # LLM post-processing (optional)
+  tkwindow/           # Tkinter GUI package (OOP refactored)
+    __init__.py       # Public API: TkWindow, main
+    __main__.py       # Entry point for python -m src.tkwindow
+    cli.py            # CLI argument parsing, logging setup
+    window.py         # TkWindow orchestrator class
+    settings.py       # Settings persistence
+    devices/          # Device enumeration (platform-specific)
+      __init__.py     # Unified entry point
+      linux.py        # pactl-based listing
+      windows.py      # PyAudio-based listing
+    audio/            # Audio capture abstraction
+      __init__.py     # Factory: create_audio_capture()
+      base.py         # Abstract base: BaseAudioCapture
+      linux.py        # PulseAudio/PipeWire via parec
+      windows.py      # PyAudio stream capture
+      utils/
+        amplify.py    # Volume amplification for PCM samples
+    renderer/         # Canvas rendering logic
+      __init__.py     # CanvasRenderer class
+      pool.py         # Canvas text item pool pre-allocation
+    gui/              # Tkinter GUI construction
+      __init__.py     # build_window() assembly
+      controls.py     # Top bar: buttons, status, quick-select
+      canvases.py     # Dual-canvas layout, resize/mousewheel
   static/
     index.html        # Web UI
     app.js            # Audio capture + WebSocket client
@@ -286,6 +343,10 @@ python start.py --debug
 python -m src.console
 python -m src.console --engine whisper --whisper-model small
 
+# Run GUI transcription window
+python -m src.tkwindow --list-devices
+python -m src.tkwindow --vosk-model /path/to/model --user-speaker --volume 3.0
+
 # Run tests
 python -m pytest tests/ -v
 
@@ -299,6 +360,7 @@ pip-audit
 - **Server stays alive after disconnect** — after a client stops recording, the server remains running indefinitely, allowing reconnection. Server only stops when stopped with `Ctrl+C`.
 - **Audio format** — browser sends raw PCM s16le (16 kHz, mono, little-endian). The AudioWorklet processor handles resampling from the device's native sample rate using linear interpolation.
 - **Console mode** — partial results use `\r` to overwrite the terminal line; won't work in piped/redirected output.
+- **Tkinter GUI** — requires `python3-tk` system package (`apt install python3-tk` on Debian/Ubuntu) and `ttkbootstrap` Python package. Uses the `darkly` theme for a modern flat UI.
 - **LLM post-processing** is fully optional and non-blocking. If the LLM is unavailable or fails, raw transcription text is used as fallback.
 - **No build command** — this is a script-based project.
 - **GPU acceleration** is optional. Install the matching CUDA version of PyTorch before running Whisper in `cuda` mode.

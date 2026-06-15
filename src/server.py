@@ -205,9 +205,9 @@ if __name__ == "__main__":
         console_main(console_argv)
     elif args.window:
         try:
-            from .tkwindow import main as window_main
+            from .tkwindow.cli import main as window_main
         except ImportError:
-            from src.tkwindow import main as window_main
+            from src.tkwindow.cli import main as window_main
 
         window_argv = []
         if args.vosk_model:

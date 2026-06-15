@@ -379,19 +379,21 @@ def test_create_ssl_context_with_custom_files(tmp_path):
     args.ssl_keyfile = keyfile
     with patch("src.server_app.SSL_DIR") as mock_dir:
         mock_dir.exists.return_value = False
+        mock_dir.__truediv__.return_value.__str__.return_value = str(tmp_path / "cert.pem")
         try:
             ctx = _create_ssl_context(args)
         except Exception:
             pass
 
 
-def test_create_ssl_context_auto_generates():
+def test_create_ssl_context_auto_generates(tmp_path):
     """Test SSL context creation with auto-generated cert/key."""
     args = MagicMock()
     args.ssl_certfile = None
     args.ssl_keyfile = None
     with patch("src.server_app.SSL_DIR") as mock_dir:
         mock_dir.exists.return_value = False
+        mock_dir.__truediv__.return_value.__str__.return_value = str(tmp_path / "cert.pem")
         try:
             ctx = _create_ssl_context(args)
         except Exception:
@@ -552,7 +554,7 @@ def test_run_catches_keyboard_interrupt():
     engine._loaded = True
     app = ServerApp(engine=engine)
     app.build_app()
-    with patch.object(app, "start", side_effect=KeyboardInterrupt()):
+    with patch("os._exit"), patch.object(app, "start", side_effect=KeyboardInterrupt()):
         app.run()
     assert engine._model is None
     assert engine._loaded is False
@@ -565,7 +567,7 @@ def test_run_cleanup_engine():
     engine._loaded = True
     app = ServerApp(engine=engine)
     app.build_app()
-    with patch.object(app, "start", side_effect=KeyboardInterrupt()):
+    with patch("os._exit"), patch.object(app, "start", side_effect=KeyboardInterrupt()):
         app.run()
     assert engine._model is None
     assert engine._loaded is False
@@ -578,7 +580,7 @@ def test_run_no_engine_model():
     engine._loaded = True
     app = ServerApp(engine=engine)
     app.build_app()
-    with patch.object(app, "start", side_effect=KeyboardInterrupt()):
+    with patch("os._exit"), patch.object(app, "start", side_effect=KeyboardInterrupt()):
         app.run()
     assert engine._loaded is False
 
@@ -590,7 +592,7 @@ def test_run_with_runner_cleanup_error():
     app.build_app()
     app._runner = MagicMock()
     app._runner.cleanup = AsyncMock(side_effect=RuntimeError("fail"))
-    with patch.object(app, "start", side_effect=KeyboardInterrupt()):
+    with patch("os._exit"), patch.object(app, "start", side_effect=KeyboardInterrupt()):
         app.run()
 
 
@@ -601,7 +603,7 @@ def test_run_creates_app_if_none():
     assert app._app is None
     # start() calls build_app() if self._app is None
     # We patch the site.start to raise KeyboardInterrupt immediately
-    with patch("aiohttp.web.TCPSite.start", new_callable=AsyncMock):
+    with patch("os._exit"), patch("aiohttp.web.TCPSite.start", new_callable=AsyncMock):
         with patch("asyncio.Event.wait", side_effect=KeyboardInterrupt()):
             app.run()
     assert app._app is not None
@@ -618,7 +620,7 @@ def test_run_pending_tasks_cancelled():
     async def dummy_task():
         await asyncio.sleep(100)
     loop.create_task(dummy_task())
-    with patch.object(app, "start", side_effect=KeyboardInterrupt()):
+    with patch("os._exit"), patch.object(app, "start", side_effect=KeyboardInterrupt()):
         app.run()
     loop.close()
 

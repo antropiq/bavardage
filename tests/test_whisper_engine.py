@@ -12,6 +12,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.whisper_engine import WhisperEngine, WhisperRecognizer
 
+try:
+    import torch
+    _has_torch = True
+except ImportError:
+    _has_torch = False
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -513,6 +519,7 @@ def test_load_cuda_device():
         assert kwargs["compute_type"] == "float16"
 
 
+@pytest.mark.skipif(not _has_torch, reason="torch not installed")
 def test_load_auto_detects_cuda():
     """Auto device detects CUDA when available."""
     with patch("faster_whisper.WhisperModel") as wm, \
@@ -526,6 +533,7 @@ def test_load_auto_detects_cuda():
         assert kwargs["compute_type"] == "float16"
 
 
+@pytest.mark.skipif(not _has_torch, reason="torch not installed")
 def test_load_auto_falls_back_to_cpu():
     """Auto device falls back to CPU when CUDA unavailable."""
     with patch("faster_whisper.WhisperModel") as wm, \

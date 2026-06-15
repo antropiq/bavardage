@@ -16,7 +16,30 @@ src/
   base_processor.py      # Abstract processor interface
   vosk_engine.py         # Vosk model/loading/pooling
   whisper_engine.py      # faster-whisper (CTranslate2) model/loading
-  tkwindow.py            # Tkinter GUI: source dropdown + Start/Stop + live transcription
+  tkwindow/            # Tkinter GUI package (OOP refactored)
+    __init__.py        # Public API: TkWindow, main
+    __main__.py        # Entry point for python -m src.tkwindow
+    cli.py             # CLI argument parsing, logging setup
+    window.py          # TkWindow orchestrator class
+    settings.py        # Settings persistence (~/.bavardage/settings.json)
+    devices/           # Device enumeration (platform-specific)
+      __init__.py      # Unified entry point (_list_all_sources)
+      linux.py         # pactl-based listing
+      windows.py       # PyAudio-based listing
+    audio/             # Audio capture abstraction
+      __init__.py      # Factory: create_audio_capture()
+      base.py          # Abstract base: BaseAudioCapture
+      linux.py         # PulseAudio/PipeWire via parec subprocess
+      windows.py       # PyAudio stream capture
+      utils/
+        amplify.py     # Volume amplification for PCM samples
+    renderer/          # Canvas rendering logic
+      __init__.py      # CanvasRenderer class
+      pool.py          # Canvas text item pool pre-allocation
+    gui/               # Tkinter GUI construction
+      __init__.py      # build_window() assembly
+      controls.py      # Top bar: buttons, status, quick-select
+      canvases.py      # Dual-canvas layout, resize/mousewheel
   audio_processor.py     # Audio chunk processing (Vosk)
   whisper_processor.py   # Audio chunk processing (Whisper)
   transcription_buffer.py  # Fragment accumulation & silence detection
@@ -65,13 +88,13 @@ python start.py --console
 python src/server.py --console
 
 # Run GUI transcription window directly
-python src/tkwindow.py --vosk-model vosk-model-fr-0.22 --user-speaker
+python -m src.tkwindow --vosk-model vosk-model-fr-0.22 --user-speaker
 
 # List available audio devices
-python src/tkwindow.py --list-devices
+python -m src.tkwindow --list-devices
 
 # Run GUI with custom options
-python src/tkwindow.py --vosk-model /path/to/model --user-speaker --volume 3.0 --debug
+python -m src.tkwindow --vosk-model /path/to/model --user-speaker --volume 3.0 --debug
 
 # Build standalone Linux binary (requires PyInstaller)
 pip install PyInstaller
@@ -229,7 +252,7 @@ This design makes engines and processors plug-and-play interchangeable.
 - **`src/console.py` partial results use `\r`** — overwrites the terminal line with carriage return. This won't work in piped/redirected output.
 - **Microphone init blocks** — `src/console.py` opens the PyAudio stream at startup, which blocks until the mic is ready.
 - **No build command** — this is a script-based project. Install with `pip install -e ".[dev]"`.
-- **Tkinter required for GUI** — `src/tkwindow.py` needs `python3-tk` installed on the system (`apt install python3-tk` on Debian/Ubuntu) and `ttkbootstrap` Python package (`pip install ttkbootstrap`). Uses the `cosmo` theme for a modern flat UI. Run directly: `python src/tkwindow.py`.
+- **Tkinter required for GUI** — `src/tkwindow/` package needs `python3-tk` installed on the system (`apt install python3-tk` on Debian/Ubuntu) and `ttkbootstrap` Python package (`pip install ttkbootstrap`). Uses the `cosmo` theme for a modern flat UI. Run directly: `python -m src.tkwindow`.
 - **CUDA support** — install `torch` with CUDA 12.8 via `pip install -e ".[dev,cuda]"` for GPU-accelerated Whisper mode (`--whisper-device cuda`).
 - **Audio format** — browser sends raw PCM s16le (little-endian signed 16-bit) at 16kHz mono. The client does linear interpolation resampling from the device's native sample rate.
 - **Server stays alive after disconnect** — after a client stops recording, the server remains running indefinitely, allowing reconnection. Server only stops when stopped with Ctrl+C.
