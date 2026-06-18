@@ -1,10 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+PROJECT_DIR = r'/mnt/bigfoot/dev/bavardage'
+
 block_cipher = None
 
 a = Analysis(
-    ['src/tkwindow.py'],
-    pathex=[],
+    ['src/tkwindow_bootstrap.py'],
+    pathex=[PROJECT_DIR],
     binaries=[
         ('.venv/lib/python3.14/site-packages/vosk/libvosk.so', 'vosk'),
     ],
@@ -22,6 +24,21 @@ a = Analysis(
         'tkinter',
         'tkinter.font',
         'tkinter.messagebox',
+        'src.tkwindow',
+        'src.tkwindow.cli',
+        'src.tkwindow.window',
+        'src.tkwindow.settings',
+        'src.tkwindow.devices',
+        'src.tkwindow.devices.linux',
+        'src.tkwindow.audio',
+        'src.tkwindow.audio.linux',
+        'src.tkwindow.audio.utils',
+        'src.tkwindow.audio.utils.amplify',
+        'src.tkwindow.renderer',
+        'src.tkwindow.renderer.pool',
+        'src.tkwindow.gui',
+        'src.tkwindow.gui.canvases',
+        'src.tkwindow.gui.controls',
     ],
     hookspath=[],
     hooksconfig={},

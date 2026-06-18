@@ -93,6 +93,7 @@ def main() -> None:
         env=env,
         cwd=str(PROJECT_ROOT),
     )
+    window_proc = None
 
     # Cleanup handler
     _cleaned_up = False
@@ -103,7 +104,7 @@ def main() -> None:
             return
         _cleaned_up = True
         print("\nShutting down...", file=sys.stderr)
-        if server_proc.poll() is None:
+        if server_proc and server_proc.poll() is None:
             try:
                 server_proc.terminate()
                 try:
@@ -113,13 +114,25 @@ def main() -> None:
                     server_proc.communicate()
             except Exception as e:
                 print(f"Cleanup error: {e}", file=sys.stderr)
+        if window_proc and window_proc.poll() is None:
+            try:
+                window_proc.terminate()
+                try:
+                    window_proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    window_proc.kill()
+                    window_proc.communicate()
+            except Exception as e:
+                print(f"Window cleanup error: {e}", file=sys.stderr)
 
     # Handle Ctrl+C
     def signal_handler(sig, frame):
         print("\nShutting down...", file=sys.stderr)
         _cleaned_up = True
-        if server_proc.poll() is None:
+        if server_proc and server_proc.poll() is None:
             server_proc.terminate()
+        if window_proc and window_proc.poll() is None:
+            window_proc.terminate()
         # Kill parent immediately — subprocess will be reaped
         os._exit(0)
 
@@ -139,8 +152,37 @@ def main() -> None:
 
     print("Press Ctrl+C to stop.\n")
 
+    if "--window" in sys.argv[1:]:
+        # Properly check --engine value
+        engine_val = "vosk"
+        args_slice = sys.argv[1:]
+        for i, arg in enumerate(args_slice):
+            if arg == "--engine" and i + 1 < len(args_slice):
+                engine_val = args_slice[i + 1]
+                break
+        if engine_val == "whisper":
+            print("Error: --window is only supported with --engine vosk.", file=sys.stderr)
+            sys.exit(1)
+
+        exclude = [
+            "--help", "-h", "--engine", "--ssl", "--ssl-certfile", "--ssl-keyfile",
+            "--llm-url", "--llm-key", "--llm-model", "--llm-timeout",
+            "--llm-buffer-max", "--llm-silence-threshold", "--llm-buffer-min",
+            "--console", "--window", "vosk"
+        ]
+        tk_args = [arg for arg in sys.argv[1:] if arg not in exclude]
+
+        print("Launching GUI window...")
+        window_proc = subprocess.Popen(
+            [_find_python(), "-m", "src.tkwindow"] + tk_args,
+            env=env,
+            cwd=str(PROJECT_ROOT),
+        )
+
     # Wait for server process (it will exit when Ctrl+C is received)
     try:
+        if window_proc:
+            window_proc.wait()
         server_proc.communicate()
     except KeyboardInterrupt:
         pass

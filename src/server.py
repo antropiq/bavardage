@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import asyncio
 from dataclasses import dataclass
 
 from loguru import logger
@@ -78,6 +79,16 @@ def _build_typer_app():
     ):
         if engine not in ("vosk", "whisper"):
             raise typer.BadParameter(f"Invalid engine: {engine}. Must be one of: vosk, whisper")
+        if console and window:
+            raise typer.BadParameter("Console mode and Window mode cannot be used together.")
+        if console and ssl:
+            raise typer.BadParameter("Console mode does not support SSL.")
+        if console and (llm_url or llm_key):
+            raise typer.BadParameter("LLM settings are not supported in console mode.")
+        if engine == "vosk" and (whisper_model != "small" or whisper_language != "fr" or whisper_device != "auto"):
+            raise typer.BadParameter("Whisper parameters are only applicable when the Whisper engine is selected.")
+        if engine == "whisper" and vosk_model is not None:
+            raise typer.BadParameter("Vosk model parameter is only applicable when the Vosk engine is selected.")
         return ParsedArgs(
             engine=engine,
             vosk_model=vosk_model,
@@ -130,38 +141,64 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if args.console:
-        _run_console_mode(args)
-        return
     log_level = "DEBUG" if args.debug else "INFO"
     logger.remove()
     logger.add(sys.stderr, level=log_level, format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
+
+    if args.console:
+        _run_console_mode(args)
+        return
+
+    if args.window:
+        _run_window_mode(args)
+        return
+
     app = ServerApp.from_args(args)
     app.run()
+
+
 
 
 def _run_console_mode(args: ParsedArgs) -> None:
     """Run in console mode using the console module."""
     try:
-        from .console import main as console_main
+        from .console import _run_vosk_console, _run_whisper_console
     except ImportError:
-        from src.console import main as console_main
+        from src.console import _run_vosk_console, _run_whisper_console
 
-    console_argv = ["--engine", args.engine]
+    if args.engine == "vosk":
+        try:
+            asyncio.run(_run_vosk_console(args))
+        except KeyboardInterrupt:
+            pass
+    elif args.engine == "whisper":
+        try:
+            asyncio.run(_run_whisper_console(args))
+        except KeyboardInterrupt:
+            pass
+
+
+def _run_window_mode(args: ParsedArgs) -> None:
+    """Run in GUI window mode using the tkwindow module."""
+    try:
+        from .tkwindow.cli import main as window_main
+    except ImportError:
+        from src.tkwindow.cli import main as window_main
+
+    window_argv = []
     if args.vosk_model:
-        console_argv += ["--vosk-model", args.vosk_model]
-    if args.engine == "whisper":
-        console_argv += ["--whisper-model", args.whisper_model]
-        console_argv += ["--whisper-language", args.whisper_language]
+        window_argv += ["--vosk-model", args.vosk_model]
     if args.debug:
-        console_argv.append("--debug")
+        window_argv.append("--debug")
     if args.user_speaker:
-        console_argv.append("--user-speaker")
+        window_argv.append("--user-speaker")
     if args.volume != 1.0:
-        console_argv += ["--volume", str(args.volume)]
+        window_argv += ["--volume", str(args.volume)]
     if args.device is not None:
-        console_argv += ["--device", str(args.device)]
-    console_main(console_argv)
+        window_argv += ["--device", str(args.device)]
+    window_main(window_argv)
+
+
 
 
 def _typer_main() -> None:
@@ -185,45 +222,6 @@ if __name__ == "__main__":
     if isinstance(result, int):
         sys.exit(result)
     args = result
-    if args.console:
-        try:
-            from .console import main as console_main
-        except ImportError:
-            from src.console import main as console_main
+    main()
 
-        console_argv = []
-        if args.vosk_model:
-            console_argv += ["--vosk-model", args.vosk_model]
-        if args.debug:
-            console_argv.append("--debug")
-        if args.user_speaker:
-            console_argv.append("--user-speaker")
-        if args.volume != 1.0:
-            console_argv += ["--volume", str(args.volume)]
-        if args.device is not None:
-            console_argv += ["--device", str(args.device)]
-        console_main(console_argv)
-    elif args.window:
-        try:
-            from .tkwindow.cli import main as window_main
-        except ImportError:
-            from src.tkwindow.cli import main as window_main
 
-        window_argv = []
-        if args.vosk_model:
-            window_argv += ["--vosk-model", args.vosk_model]
-        if args.debug:
-            window_argv.append("--debug")
-        if args.user_speaker:
-            window_argv.append("--user-speaker")
-        if args.volume != 1.0:
-            window_argv += ["--volume", str(args.volume)]
-        if args.device is not None:
-            window_argv += ["--device", str(args.device)]
-        window_main(window_argv)
-    else:
-        log_level = "DEBUG" if args.debug else "INFO"
-        logger.remove()
-        logger.add(sys.stderr, level=log_level, format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
-        app = ServerApp.from_args(args)
-        app.run()

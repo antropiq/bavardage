@@ -13,24 +13,17 @@ import signal
 import subprocess
 import sys
 
+from typing import Any
+
 from loguru import logger
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
-from vosk import KaldiRecognizer, Model
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Real-time speech transcription (Vosk)")
-    parser.add_argument("--engine", choices=["vosk", "whisper"], default="vosk", help="Transcription engine (default: vosk)")
-    parser.add_argument("--vosk-model", default=None, help="Path to Vosk model (default: vosk-model-small-fr-0.22)")
-    parser.add_argument("--whisper-model", default="small", help="Whisper model size or local path (default: small)")
-    parser.add_argument("--whisper-language", default="fr", help="Language code for Whisper (default: fr)")
-    parser.add_argument("--debug", action="store_true", help="Enable DEBUG-level logging")
-    parser.add_argument("--user-speaker", action="store_true", help="Capture system speaker output instead of microphone")
-    parser.add_argument("--volume", type=float, default=1.0, help="Input volume multiplier (default: 1.0)")
-    parser.add_argument("--device", type=int, default=None, help="Audio device index (skips interactive selection)")
-    return parser
+from src.vosk_engine import VoskEngine
+from src.whisper_engine import WhisperEngine
+from src.audio_processor import AudioProcessor
+from src.whisper_processor import WhisperProcessor
+from src.tkwindow.audio import create_audio_capture
 
 
 def _list_monitor_sources() -> list[tuple[str, str]]:
@@ -162,13 +155,16 @@ class SubtitleDisplay:
             return
         # Vosk FinalResult() is cumulative — only append the delta
         if text.startswith(self._displayed):
-            delta = text[len(self._displayed):]
-            if delta:
-                self.final_lines.append(Text(delta, style="bold yellow"))
-                self._displayed = text
+            # It's a continuation of the current line
+            if self.final_lines:
+                # Update the last line with the new text (which includes the prefix)
+                self.final_lines[-1] = Text(text, style="bold yellow")
+            else:
+                self.final_lines.append(Text(text, style="bold yellow"))
+            self._displayed = text
         else:
-            # Correction or reset — replace displayed text
-            self.final_lines = [Text(text, style="bold yellow")]
+            # Correction or new sentence — append as a new line to preserve history
+            self.final_lines.append(Text(text, style="bold yellow"))
             self._displayed = text
         self.live.update(self._render())
 
@@ -183,145 +179,94 @@ class SubtitleDisplay:
         self.live.stop()
 
 
-async def run_console(model_path=None, user_speaker=False, volume=1.0, device=None):
-    if model_path is None:
-        model_path = "vosk-model-small-fr-0.22"
-
-    model = Model(model_path)
-    rec = KaldiRecognizer(model, 16000)
-    rec.SetWords(True)
-
-    # Select source
-    source_name = _select_source(user_speaker, device)
-    if source_name is None:
-        logger.error("No source selected, exiting.")
-        return
-
-    # Start parec subprocess (16kHz mono s16le)
-    proc = subprocess.Popen(
-        ["parec", "--device", source_name, "--format", "s16le", "--rate", "16000", "--channels", "1"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-
-    def _kill():
-        if proc.poll() is None:
-            proc.send_signal(signal.SIGTERM)
-            try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-
-    console = Console()
-    display = SubtitleDisplay(console)
-    display.start()
-
+async def _run_transcription(engine: Any, processor: Any, capture: Any, display: SubtitleDisplay, volume: float) -> None:
     try:
-        print(f"Listening ({'monitor' if user_speaker else 'mic'})... Press Ctrl+C to stop.", file=sys.stderr)
-
-        last_final = ""
-        last_partial = ""
-        chunk_count = 0
-
+        print(f"Listening... Press Ctrl+C to stop.", file=sys.stderr)
         while True:
-            data = await asyncio.to_thread(proc.stdout.read, 1024)
-            if len(data) == 0:
+            data = await asyncio.to_thread(capture.read, 4000)
+            if not data:
                 break
 
             if volume > 1.0:
                 data = _amplify(data, volume)
 
-            chunk_count += 1
-            accepted = rec.AcceptWaveform(data)
-
-            if accepted:
-                result_str = rec.FinalResult()
-                result = json.loads(result_str)
+            result = await processor.process_chunk(data)
+            if result:
                 text = result.get("text", "").strip()
-                if text and text != last_final:
+                if result.get("type") == "final":
                     display.commit_final(text)
-                    last_final = text
-                    last_partial = ""
-            else:
-                partial_str = rec.PartialResult()
-                partial = json.loads(partial_str)
-                partial_text = partial.get("partial", "").strip()
-                if partial_text and partial_text != last_partial:
-                    display.update_partial(partial_text)
-                    last_partial = partial_text
-
+                elif result.get("type") == "partial":
+                    display.update_partial(text)
+    except asyncio.CancelledError:
+        display.stop()
+        print("\nStopped.", file=sys.stderr)
+        raise
     except KeyboardInterrupt:
         display.stop()
-        console.print("\nStopped.")
-    finally:
-        _kill()
+        print("\nStopped.", file=sys.stderr)
 
 
 async def _run_vosk_console(args) -> None:
-    """Run console transcription with Vosk engine."""
     model_path = args.vosk_model or "vosk-model-small-fr-0.22"
-    await run_console(model_path, args.user_speaker, args.volume, args.device)
+    engine = VoskEngine(model_path)
+    recognizer = await engine.create_recognizer()
+    processor = AudioProcessor(recognizer)
+    
+    source_name = _select_source(args.user_speaker, args.device)
+    if source_name is None:
+        logger.error("No source selected, exiting.")
+        return
+
+    capture = create_audio_capture(source_name)
+    display = SubtitleDisplay(Console())
+    display.start()
+    
+    try:
+        await _run_transcription(engine, processor, capture, display, args.volume)
+    finally:
+        display.stop()
+        capture.close()
 
 
 async def _run_whisper_console(args) -> None:
-    """Run console transcription with Whisper engine."""
-    from src.whisper_engine import WhisperEngine
-    from src.transcription_buffer import TranscriptionBuffer
-    from src.whisper_processor import WhisperProcessor
-
-    engine = WhisperEngine(args.whisper_model, language=args.whisper_language, device="auto")
+    engine = WhisperEngine(args.whisper_model, language=args.whisper_language, device=args.whisper_device)
     engine.load()
-    buffer = TranscriptionBuffer()
-    processor = WhisperProcessor(engine, buffer)
-
-    console = Console()
-    console.print(f"[bold]Listening with Whisper ({args.whisper_language})... Press Ctrl+C to stop.[/bold]")
-
-    try:
-        while True:
-            import pyaudio
-            break
-    except ImportError:
-        console.print("[red]PyAudio not available for Whisper console mode.[/red]")
+    recognizer = await engine.create_recognizer()
+    processor = WhisperProcessor(recognizer)
+    
+    source_name = _select_source(args.user_speaker, args.device)
+    if source_name is None:
+        logger.error("No source selected, exiting.")
         return
 
-    # Use PyAudio stream for Whisper console mode
-    audio = pyaudio.PyAudio()
+    capture = create_audio_capture(source_name)
+    display = SubtitleDisplay(Console())
+    display.start()
+    
     try:
-        stream = audio.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=16000,
-            input=True,
-            frames_per_buffer=4000,
-        )
-        last_final = ""
-        last_partial = ""
-        while True:
-            data = stream.read(4000, exception_on_overflow=False)
-            if volume > 1.0:
-                data = _amplify(data, volume)
-            result = processor.process_chunk(data)
-            if result is not None:
-                text = result.get("text", "")
-                if result.get("type") == "final" and text and text != last_final:
-                    display.commit_final(text)
-                    last_final = text
-                    last_partial = ""
-                elif result.get("type") == "partial" and text and text != last_partial:
-                    display.update_partial(text)
-                    last_partial = text
-    except KeyboardInterrupt:
-        display.stop()
-        console.print("\nStopped.")
+        await _run_transcription(engine, processor, capture, display, args.volume)
     finally:
-        stream.stop_stream()
-        stream.close()
-        audio.terminate()
+        display.stop()
+        capture.close()
 
 
-def main(argv=None):
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for standalone console mode."""
+    parser = argparse.ArgumentParser(description="Real-time speech transcription (Vosk or Whisper)")
+    parser.add_argument("--engine", choices=["vosk", "whisper"], default="vosk", help="Transcription engine (default: vosk)")
+    parser.add_argument("--vosk-model", default=None, help="Path to Vosk model (default: vosk-model-small-fr-0.22)")
+    parser.add_argument("--whisper-model", default="small", help="Whisper model size or local path (default: small)")
+    parser.add_argument("--whisper-language", default="fr", help="Language code for Whisper (default: fr)")
+    parser.add_argument("--whisper-device", default="auto", help="Whisper device (default: auto)")
+    parser.add_argument("--debug", action="store_true", help="Enable DEBUG-level logging")
+    parser.add_argument("--user-speaker", action="store_true", help="Capture system speaker output instead of microphone")
+    parser.add_argument("--volume", type=float, default=1.0, help="Input volume multiplier (default: 1.0)")
+    parser.add_argument("--device", type=int, default=None, help="Audio device index (skips interactive selection)")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Entry point for standalone console mode: python -m src.console."""
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -329,17 +274,32 @@ def main(argv=None):
     logger.remove()
     logger.add(sys.stderr, level=log_level, format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
 
+    # Build a ParsedArgs-compatible namespace
+    console_args = argparse.Namespace(
+        engine=args.engine,
+        vosk_model=args.vosk_model,
+        whisper_model=args.whisper_model,
+        whisper_language=args.whisper_language,
+        whisper_device=args.whisper_device,
+        user_speaker=args.user_speaker,
+        volume=args.volume,
+        device=args.device,
+    )
+
     if args.engine == "vosk":
         try:
-            asyncio.run(_run_vosk_console(args))
+            asyncio.run(_run_vosk_console(console_args))
         except KeyboardInterrupt:
             pass
     elif args.engine == "whisper":
         try:
-            asyncio.run(_run_whisper_console(args))
+            asyncio.run(_run_whisper_console(console_args))
         except KeyboardInterrupt:
             pass
 
 
 if __name__ == "__main__":
     main()
+
+
+

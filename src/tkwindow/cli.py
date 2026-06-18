@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from loguru import logger
 
@@ -44,6 +45,10 @@ def main(argv: list[str] | None = None) -> None:
         "--device", type=int, default=None,
         help="Audio device index",
     )
+    parser.add_argument(
+        "--transcription", nargs="?", const=str(Path.home() / "transcription.txt"), default=None,
+        help="Write final transcription to a file (default: ~/transcription.txt)",
+    )
     args = parser.parse_args(argv)
 
     if args.list_devices:
@@ -56,7 +61,7 @@ def main(argv: list[str] | None = None) -> None:
     logger.add(sys.stderr, level=log_level, format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
 
     model_path = args.vosk_model or "vosk-model-small-fr-0.22"
-    window = TkWindow(model_path, args.user_speaker, args.volume, args.device)
+    window = TkWindow(model_path, args.user_speaker, args.volume, args.device, args.transcription)
     window.run()
 
 

@@ -95,6 +95,12 @@ def _resolve_icon_path() -> str:
 def _update_device_buttons(window, controls: GuiControls) -> None:
     """Update speaker/mic button states based on configured device indices."""
     from ttkbootstrap.constants import NORMAL, DISABLED, OUTLINE, PRIMARY
+    # CLI --device takes precedence over settings
+    if window.device is not None and 0 <= window.device < len(window._sources):
+        window._active_index = window.device
+        controls.toggle_btn.config(state=NORMAL)
+        controls.clear_btn.config(state=NORMAL)
+        return
     if window._speaker_index is not None and 0 <= window._speaker_index < len(window._sources):
         window._active_index = window._speaker_index
         controls.speaker_btn.config(state=NORMAL, bootstyle=PRIMARY)

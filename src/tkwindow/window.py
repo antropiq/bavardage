@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sys
 import tkinter as tk
+from pathlib import Path
 
 from loguru import logger
 from vosk import KaldiRecognizer, Model
@@ -35,11 +36,13 @@ class TkWindow:
         user_speaker: bool = False,
         volume: float = 1.0,
         device: int | None = None,
+        transcription_path: str | None = None,
     ) -> None:
         self.model_path = model_path
         self.user_speaker = user_speaker
         self.volume = volume
         self.device = device
+        self.transcription_path = transcription_path
         self.running = False
         self.rec: KaldiRecognizer | None = None
         self.model: Model | None = None
@@ -48,6 +51,7 @@ class TkWindow:
         self._partial_text = ""
         self._last_final = ""
         self._last_partial = ""
+        self._accumulated_text = ""
 
         # Device management
         self._sources: list[tuple[str, str, str]] = []
@@ -144,8 +148,19 @@ class TkWindow:
         self._partial_text = ""
         self._last_final = ""
         self._last_partial = ""
+        self._accumulated_text = ""
         if self._renderer:
             self._renderer.clear()
+        if self.transcription_path:
+            Path(self.transcription_path).write_text("", encoding="utf-8")
+
+    def _write_transcription(self, text: str) -> None:
+        """Write accumulated transcription to the output file."""
+        if not self.transcription_path:
+            return
+        path = Path(self.transcription_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self._accumulated_text, encoding="utf-8")
 
     def _toggle_speaker(self) -> None:
         """Switch active device to the configured speaker monitor."""
@@ -194,9 +209,8 @@ class TkWindow:
         self.rec = KaldiRecognizer(self.model, 16000)
         self.rec.SetWords(True)
 
-        # Start audio capture
+        # Start audio capture (create_audio_capture starts it automatically)
         self._audio_capture = self._create_audio_capture(source_name)
-        self._audio_capture.start()
 
         self.running = True
         self._last_final = ""
@@ -260,8 +274,12 @@ class TkWindow:
             result = json.loads(result_str)
             text = result.get("text", "").strip()
             if text and text != self._last_final:
-                self._last_final = text
                 self._partial_text = ""
+                if self._accumulated_text:
+                    self._accumulated_text += "\n" + text
+                else:
+                    self._accumulated_text = text
+                self._last_final = text
                 if self._renderer:
                     self._renderer._active_is_top = not self._renderer._active_is_top
                 self._root.after(0, self._render)
@@ -277,9 +295,11 @@ class TkWindow:
         self._root.after(16, self._process_loop)
 
     def _render(self) -> None:
-        """Trigger ping-pong canvas rendering."""
+        """Trigger ping-pong canvas rendering and write transcription file."""
         if self._renderer:
             self._renderer.render_ping_pong(self._last_final, self._partial_text)
+        if self._last_final and self.transcription_path:
+            self._write_transcription(self._last_final)
 
     # --- Entry point ---
 
@@ -288,6 +308,11 @@ class TkWindow:
         # Load settings and enumerate devices
         self._load_device_settings()
         self._sources = list_all_sources()
+
+        # CLI --device overrides settings
+        if self.device is not None and 0 <= self.device < len(self._sources):
+            self._active_index = self.device
+            self._autostart = True
 
         # Build GUI
         self._root = build_window(self)
